@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="记账本">
+    <meta name="theme-color" content="#5865F2">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <title>记账本</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="js/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="mac-window">
+        <!-- Title Bar with Traffic Lights -->
+        <div class="title-bar">
+            <div class="traffic-lights">
+                <div class="traffic-light traffic-light-red"></div>
+                <div class="traffic-light traffic-light-yellow"></div>
+                <div class="traffic-light traffic-light-green"></div>
+            </div>
+            <div class="title-text">记账本 Bookkeeping</div>
+        </div>
+
+        <div class="window-body">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <nav class="nav-menu">
+                    <a class="nav-item active" data-view="dashboard">
+                        <i class="fa-solid fa-house"></i>
+                        <span>仪表盘</span>
+                    </a>
+                    <a class="nav-item" data-view="transactions">
+                        <i class="fa-solid fa-list-ul"></i>
+                        <span>交易记录</span>
+                    </a>
+                    <a class="nav-item" data-view="reports">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>报表分析</span>
+                    </a>
+                    <a class="nav-item nav-item-desktop-only" data-view="budget">
+                        <i class="fa-solid fa-wallet"></i>
+                        <span>预算管理</span>
+                    </a>
+                    <a class="nav-item" data-view="settings">
+                        <i class="fa-solid fa-gear"></i>
+                        <span>设置</span>
+                    </a>
+                </nav>
+                <div class="sidebar-footer">
+                    <div class="month-card">
+                        <div class="month-label" id="sidebarMonth">本月概览</div>
+                        <div class="month-income">
+                            <span class="label">收入</span>
+                            <span class="amount" id="sidebarIncome">¥0.00</span>
+                        </div>
+                        <div class="month-expense">
+                            <span class="label">支出</span>
+                            <span class="amount" id="sidebarExpense">¥0.00</span>
+                        </div>
+                        <div class="month-balance">
+                            <span class="label">结余</span>
+                            <span class="amount" id="sidebarBalance">¥0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Dashboard View -->
+                <section class="view active" id="view-dashboard">
+                    <div class="view-header">
+                        <h1>仪表盘</h1>
+                        <div class="date-display" id="todayDate"></div>
+                    </div>
+                    <div class="stat-cards">
+                        <div class="stat-card stat-income">
+                            <div class="stat-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-label">本月收入</div>
+                                <div class="stat-value" id="dashIncome">¥0.00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card stat-expense">
+                            <div class="stat-icon"><i class="fa-solid fa-arrow-trend-down"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-label">本月支出</div>
+                                <div class="stat-value" id="dashExpense">¥0.00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card stat-balance">
+                            <div class="stat-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-label">本月结余</div>
+                                <div class="stat-value" id="dashBalance">¥0.00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card stat-savings">
+                            <div class="stat-icon"><i class="fa-solid fa-piggy-bank"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-label">储蓄率</div>
+                                <div class="stat-value" id="dashSavingsRate">0%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Mobile-only budget quick access -->
+                    <div class="mobile-budget-card" onclick="switchView('budget')">
+                        <div class="mobile-budget-icon"><i class="fa-solid fa-wallet"></i></div>
+                        <div class="mobile-budget-info">
+                            <div class="mobile-budget-title">预算管理</div>
+                            <div class="mobile-budget-desc" id="mobileBudgetDesc">点击查看预算使用情况</div>
+                        </div>
+                        <i class="fa-solid fa-chevron-right mobile-budget-arrow"></i>
+                    </div>
+                    <div class="dash-charts">
+                        <div class="chart-card chart-wide">
+                            <div class="chart-header">
+                                <h3>收支趋势</h3>
+                                <span class="chart-subtitle">近6个月</span>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="trendChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>支出分类</h3>
+                                <span class="chart-subtitle">本月</span>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="categoryChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="recent-section">
+                        <div class="section-header">
+                            <h3>最近交易</h3>
+                            <button class="link-btn" data-goto="transactions">查看全部 <i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+                        <div class="transaction-list" id="recentTransactions"></div>
+                    </div>
+                </section>
+
+                <!-- Transactions View -->
+                <section class="view" id="view-transactions">
+                    <div class="view-header">
+                        <h1>交易记录</h1>
+                        <button class="primary-btn" onclick="openTransactionModal()">
+                            <i class="fa-solid fa-plus"></i> 记一笔
+                        </button>
+                    </div>
+                    <!-- Mobile floating add button -->
+                    <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                    <div class="filter-bar">
+                        <div class="filter-tabs">
+                            <button class="filter-tab active" data-filter="all">全部</button>
+                            <button class="filter-tab" data-filter="expense">支出</button>
+                            <button class="filter-tab" data-filter="income">收入</button>
+                        </div>
+                        <div class="filter-right">
+                            <div class="search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="searchInput" placeholder="搜索交易备注...">
+                            </div>
+                            <select class="filter-select" id="monthFilter">
+                                <option value="">所有月份</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="transaction-list full" id="allTransactions"></div>
+                    <div class="empty-state hidden" id="emptyTransactions">
+                        <i class="fa-solid fa-receipt"></i>
+                        <p>暂无交易记录</p>
+                        <button class="primary-btn" onclick="openTransactionModal()">
+                            <i class="fa-solid fa-plus"></i> 记一笔
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Reports View -->
+                <section class="view" id="view-reports">
+                    <div class="view-header">
+                        <h1>报表分析</h1>
+                        <div class="report-controls">
+                            <div class="report-period">
+                                <button class="period-btn active" data-period="month">月报</button>
+                                <button class="period-btn" data-period="year">年报</button>
+                            </div>
+                            <select class="filter-select" id="reportYearSelect"></select>
+                            <select class="filter-select" id="reportMonthSelect"></select>
+                        </div>
+                    </div>
+                    <div class="report-summary">
+                        <div class="report-card">
+                            <span class="report-label">总收入</span>
+                            <span class="report-value income" id="reportIncome">¥0.00</span>
+                        </div>
+                        <div class="report-card">
+                            <span class="report-label">总支出</span>
+                            <span class="report-value expense" id="reportExpense">¥0.00</span>
+                        </div>
+                        <div class="report-card">
+                            <span class="report-label">净结余</span>
+                            <span class="report-value" id="reportBalance">¥0.00</span>
+                        </div>
+                        <div class="report-card">
+                            <span class="report-label">日均支出</span>
+                            <span class="report-value" id="reportDailyAvg">¥0.00</span>
+                        </div>
+                    </div>
+                    <div class="report-charts">
+                        <div class="chart-card chart-wide">
+                            <div class="chart-header">
+                                <h3 id="monthlyChartTitle">月度收支对比</h3>
+                                <span class="chart-subtitle" id="monthlyChartSubtitle"></span>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="monthlyChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>支出分类排行</h3>
+                            </div>
+                            <div class="category-rank-content">
+                                <div class="category-rank-chart">
+                                    <canvas id="rankPieChart"></canvas>
+                                </div>
+                                <div class="category-rank-list" id="categoryRankList"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3>每日支出走势</h3>
+                            <span class="chart-subtitle" id="dailyChartSubtitle">本月</span>
+                        </div>
+                        <div class="chart-container tall">
+                            <canvas id="dailyChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Budget View -->
+                <section class="view" id="view-budget">
+                    <div class="view-header">
+                        <h1>预算管理</h1>
+                        <button class="primary-btn" onclick="openBudgetModal()">
+                            <i class="fa-solid fa-plus"></i> 设置预算
+                        </button>
+                    </div>
+                    <div class="budget-overview">
+                        <div class="budget-total-card">
+                            <div class="budget-total-label">本月总预算</div>
+                            <div class="budget-total-amount" id="totalBudget">¥0.00</div>
+                            <div class="budget-total-spent">
+                                已使用 <span id="totalSpent">¥0.00</span>
+                            </div>
+                            <div class="budget-progress-bar">
+                                <div class="budget-progress-fill" id="totalProgress"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="budget-list" id="budgetList"></div>
+                    <div class="empty-state hidden" id="emptyBudget">
+                        <i class="fa-solid fa-wallet"></i>
+                        <p>尚未设置预算</p>
+                        <button class="primary-btn" onclick="openBudgetModal()">
+                            <i class="fa-solid fa-plus"></i> 设置预算
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Categories View -->
+                <section class="view" id="view-categories">
+                    <div class="view-header">
+                        <h1>分类管理</h1>
+                        <button class="primary-btn" onclick="openCategoryModal()">
+                            <i class="fa-solid fa-plus"></i> 新建分类
+                        </button>
+                    </div>
+                    <div class="category-sections">
+                        <div class="category-section">
+                            <h3><i class="fa-solid fa-arrow-down"></i> 支出分类</h3>
+                            <div class="category-grid" id="expenseCategories"></div>
+                        </div>
+                        <div class="category-section">
+                            <h3><i class="fa-solid fa-arrow-up"></i> 收入分类</h3>
+                            <div class="category-grid" id="incomeCategories"></div>
+                        </div>
+                        <div class="category-section">
+                            <h3><i class="fa-solid fa-credit-card"></i> 支付方式 <span class="pm-section-hint">点击可设为默认</span></h3>
+                            <div class="payment-methods-manage" id="paymentMethodsList"></div>
+                            <div class="payment-add-row">
+                                <input type="text" class="text-input" id="newPaymentInput" placeholder="输入新的支付方式名称...">
+                                <button class="primary-btn" onclick="addPaymentMethod()">
+                                    <i class="fa-solid fa-plus"></i> 添加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings View -->
+                <section class="view" id="view-settings">
+                    <div class="view-header">
+                        <h1>设置</h1>
+                    </div>
+                    <div class="settings-sections">
+                        <div class="settings-section">
+                            <h3>通用</h3>
+                            <div class="settings-row">
+                                <div class="settings-label">货币符号</div>
+                                <select class="settings-select" id="currencySelect">
+                                    <option value="¥">¥ 人民币</option>
+                                    <option value="$">$ 美元</option>
+                                    <option value="€">€ 欧元</option>
+                                    <option value="£">£ 英镑</option>
+                                    <option value="¥">¥ 日元</option>
+                                </select>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">外观</div>
+                                <div class="theme-toggle">
+                                    <button class="theme-btn active" data-theme="light"><i class="fa-solid fa-sun"></i> 浅色</button>
+                                    <button class="theme-btn" data-theme="dark"><i class="fa-solid fa-moon"></i> 深色</button>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">分类管理</div>
+                                <button class="secondary-btn" onclick="switchView('categories')">
+                                    <i class="fa-solid fa-tags"></i> 管理
+                                </button>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <h3>数据管理</h3>
+                            <div class="settings-row">
+                                <div class="settings-label">导出数据</div>
+                                <button class="secondary-btn" onclick="exportData()">
+                                    <i class="fa-solid fa-download"></i> 导出 Excel
+                                </button>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">导入数据</div>
+                                <button class="secondary-btn" onclick="document.getElementById('importFile').click()">
+                                    <i class="fa-solid fa-upload"></i> 导入 Excel
+                                </button>
+                                <input type="file" id="importFile" accept=".xlsx,.xls" style="display:none" onchange="importData(event)">
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">加载示例数据</div>
+                                <button class="secondary-btn" onclick="loadSampleData()">
+                                    <i class="fa-solid fa-flask"></i> 加载示例
+                                </button>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">清空所有数据</div>
+                                <button class="danger-btn" onclick="clearAllData()">
+                                    <i class="fa-solid fa-trash"></i> 清空
+                                </button>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <h3><i class="fa-solid fa-cloud"></i> iCloud 同步</h3>
+                            <div id="icloudSyncSection"></div>
+                        </div>
+                        <div class="settings-section">
+                            <h3>关于</h3>
+                            <div class="about-info">
+                                <div class="about-icon"><i class="fa-solid fa-book"></i></div>
+                                <div>
+                                    <div class="about-name">记账本 Bookkeeping</div>
+                                    <div class="about-version">版本 1.0.0</div>
+                                    <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- Transaction Modal -->
+        <div class="modal-overlay hidden" id="transactionModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2 id="transactionModalTitle">记一笔</h2>
+                    <button class="modal-close" onclick="closeTransactionModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="type-toggle">
+                        <button class="type-btn active" data-type="expense">支出</button>
+                        <button class="type-btn" data-type="income">收入</button>
+                    </div>
+                    <div class="form-group">
+                        <label>金额</label>
+                        <div class="amount-input-wrapper">
+                            <span class="currency-symbol" id="modalCurrency">¥</span>
+                            <input type="number" inputmode="decimal" class="amount-input" id="amountInput" placeholder="0.00" step="0.01" min="0">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>分类</label>
+                        <div class="category-picker" id="categoryPicker"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>日期</label>
+                            <input type="date" class="text-input" id="dateInput">
+                        </div>
+                        <div class="form-group">
+                            <label>支付方式</label>
+                            <select class="text-input" id="paymentInput">
+                                <option value="微信支付" selected>微信支付</option>
+                                <option value="支付宝">支付宝</option>
+                                <option value="现金">现金</option>
+                                <option value="银行卡">银行卡</option>
+                                <option value="信用卡">信用卡</option>
+                                <option value="其他">其他</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <input type="text" class="text-input" id="noteInput" placeholder="可选备注...">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="danger-btn" id="deleteTxnBtn" onclick="deleteTransactionFromModal()" style="display:none">
+                        <i class="fa-solid fa-trash"></i> 删除
+                    </button>
+                    <div style="flex:1"></div>
+                    <button class="secondary-btn" onclick="closeTransactionModal()">取消</button>
+                    <button class="primary-btn" onclick="saveTransaction()">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Category Modal -->
+        <div class="modal-overlay hidden" id="categoryModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2 id="categoryModalTitle">新建分类</h2>
+                    <button class="modal-close" onclick="closeCategoryModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="type-toggle">
+                        <button class="type-btn active" data-cat-type="expense">支出分类</button>
+                        <button class="type-btn" data-cat-type="income">收入分类</button>
+                    </div>
+                    <div class="form-group">
+                        <label>名称</label>
+                        <input type="text" class="text-input" id="catNameInput" placeholder="分类名称">
+                    </div>
+                    <div class="form-group">
+                        <label>图标</label>
+                        <div class="icon-picker" id="iconPicker"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>颜色</label>
+                        <div class="color-picker" id="colorPicker"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn" onclick="closeCategoryModal()">取消</button>
+                    <button class="primary-btn" onclick="saveCategory()">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Budget Modal -->
+        <div class="modal-overlay hidden" id="budgetModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>设置预算</h2>
+                    <button class="modal-close" onclick="closeBudgetModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>选择分类</label>
+                        <select class="text-input" id="budgetCategorySelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>月度预算金额</label>
+                        <div class="amount-input-wrapper">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" class="amount-input" id="budgetAmountInput" placeholder="0.00" step="0.01" min="0">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn" onclick="closeBudgetModal()">取消</button>
+                    <button class="primary-btn" onclick="saveBudget()">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div class="toast-container" id="toastContainer"></div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        // Register Service Worker for PWA offline support
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {});
+            });
+        }
+    </script>
+</body>
+</html>
