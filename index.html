@@ -336,6 +336,14 @@
                                 </div>
                             </div>
                             <div class="settings-row">
+                                <div class="settings-label">默认打开页面<div class="settings-sublabel">启动时自动进入的页面</div></div>
+                                <select class="settings-select" id="defaultViewSelect" onchange="setDefaultView(this.value)">
+                                    <option value="dashboard">仪表盘</option>
+                                    <option value="transactions">交易记录</option>
+                                    <option value="reports">报表分析</option>
+                                </select>
+                            </div>
+                            <div class="settings-row">
                                 <div class="settings-label">分类管理</div>
                                 <button class="secondary-btn" onclick="switchView('categories')">
                                     <i class="fa-solid fa-tags"></i> 管理

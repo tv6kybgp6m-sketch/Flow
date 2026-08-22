@@ -50,7 +50,7 @@ let state = {
     categories: [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES],
     budgets: [],
     paymentMethods: [...DEFAULT_PAYMENT_METHODS],
-    settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付' },
+    settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard' },
     currentView: 'dashboard',
     transactionFilter: 'all',
     searchQuery: '',
@@ -362,7 +362,7 @@ function loadState() {
             state.paymentMethods = (data.paymentMethods && data.paymentMethods.length > 0)
                 ? data.paymentMethods
                 : [...DEFAULT_PAYMENT_METHODS];
-            state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付' }, ...data.settings };
+            state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard' }, ...data.settings };
         } catch (e) {
             console.error('Failed to load state:', e);
         }
@@ -1492,6 +1492,8 @@ function renderSettings() {
     document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.theme === state.settings.theme);
     });
+    const dvSelect = document.getElementById('defaultViewSelect');
+    if (dvSelect) dvSelect.value = state.settings.defaultView || 'dashboard';
     updateICloudSyncUI();
 }
 
@@ -1502,6 +1504,12 @@ function applyTheme(theme) {
     // Re-render charts with new colors
     if (state.currentView === 'dashboard') renderDashboard();
     if (state.currentView === 'reports') renderReports();
+}
+
+function setDefaultView(view) {
+    state.settings.defaultView = view;
+    saveState();
+    showToast('已设置默认打开页面', 'success');
 }
 
 // ---- Data Export/Import (Excel) ----
@@ -1869,7 +1877,7 @@ function init() {
     loadState();
     document.documentElement.setAttribute('data-theme', state.settings.theme);
     initEventListeners();
-    switchView('dashboard');
+    switchView(state.settings.defaultView || 'dashboard');
 
     // Auto-load sample data on first visit
     if (state.transactions.length === 0 && !localStorage.getItem(STORAGE_KEY + '_visited')) {
