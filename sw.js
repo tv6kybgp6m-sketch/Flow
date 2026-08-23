@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookkeeping-v1.4.0';
+const CACHE_NAME = 'bookkeeping-v1.4.5';
 const ASSETS = [
   './',
   './index.html',

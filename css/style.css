@@ -1114,26 +1114,124 @@ body {
     margin-top: 2px;
 }
 
-.category-card-delete {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--expense-light);
-    color: var(--expense);
-    border: none;
-    cursor: pointer;
-    font-size: 10px;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    transition: all var(--transition);
+.category-card {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 
-.category-card:hover .category-card-delete {
+/* iOS-style action sheet (tap a category card) */
+.action-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1200;
     display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+.action-sheet-overlay.hidden {
+    display: none;
+}
+.action-sheet {
+    width: 100%;
+    max-width: 420px;
+    background: var(--bg-card);
+    border-radius: 16px 16px 0 0;
+    padding: 8px 12px calc(14px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    animation: sheetUp 0.22s ease;
+}
+@keyframes sheetUp {
+    from { transform: translateY(60px); opacity: 0.4; }
+    to { transform: none; opacity: 1; }
+}
+.action-sheet-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 8px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 6px;
+}
+.action-sheet-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+}
+.action-sheet-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 15px;
+}
+.action-sheet-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 13px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 15px;
+    text-align: left;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.action-sheet-btn:hover {
+    background: var(--accent-light);
+}
+.action-sheet-btn i {
+    width: 20px;
+    text-align: center;
+    color: var(--accent);
+}
+.action-sheet-danger {
+    color: #ff3b30;
+}
+.action-sheet-danger i {
+    color: #ff3b30;
+}
+.action-sheet-cancel {
+    margin-top: 8px;
+    width: 100%;
+    padding: 13px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+/* Long-press drag-to-reorder */
+.cat-drag-ghost {
+    position: fixed;
+    z-index: 1300;
+    pointer-events: none;
+    margin: 0;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.25);
+    transform: scale(1.04);
+    opacity: 0.96;
+}
+.cat-drag-placeholder {
+    border: 2px dashed var(--accent);
+    border-radius: var(--radius-lg);
+    background: var(--accent-light);
+    box-sizing: border-box;
+}
+body.cat-dragging {
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* Settings */
@@ -1191,6 +1289,49 @@ body {
     background: var(--bg-content);
     border-radius: var(--radius-md);
     padding: 3px;
+}
+
+/* iOS-style toggle switch */
+.ios-toggle {
+    position: relative;
+    display: inline-block;
+    width: 51px;
+    height: 31px;
+    flex-shrink: 0;
+}
+.ios-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.ios-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #e5e5ea;
+    border-radius: 31px;
+    transition: 0.3s;
+}
+.ios-toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 27px;
+    width: 27px;
+    left: 2px;
+    bottom: 2px;
+    background: #fff;
+    border-radius: 50%;
+    transition: 0.3s;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+.ios-toggle input:checked + .ios-toggle-slider {
+    background: #34c759;
+}
+.ios-toggle input:checked + .ios-toggle-slider::before {
+    transform: translateX(20px);
+}
+[data-theme="dark"] .ios-toggle-slider {
+    background: #39393d;
 }
 
 [data-theme="dark"] .theme-toggle {
@@ -1492,6 +1633,10 @@ body {
     flex: 1;
 }
 
+.form-row .form-group-time {
+    flex: 0.6;
+}
+
 .text-input {
     width: 100%;
     background: var(--bg-input);
@@ -1739,6 +1884,8 @@ body {
     :root {
         --sidebar-width: 0px;
     }
+
+    /* Touch devices: category cards are managed via tap sheet + long-press drag */
 
     /* macOS title bar → simple mobile header */
     body {

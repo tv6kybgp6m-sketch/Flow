@@ -50,7 +50,7 @@ let state = {
     categories: [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES],
     budgets: [],
     paymentMethods: [...DEFAULT_PAYMENT_METHODS],
-    settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard' },
+    settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard', autoOpenAdd: false },
     currentView: 'dashboard',
     transactionFilter: 'all',
     searchQuery: '',
@@ -362,7 +362,7 @@ function loadState() {
             state.paymentMethods = (data.paymentMethods && data.paymentMethods.length > 0)
                 ? data.paymentMethods
                 : [...DEFAULT_PAYMENT_METHODS];
-            state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard' }, ...data.settings };
+            state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard', autoOpenAdd: false }, ...data.settings };
         } catch (e) {
             console.error('Failed to load state:', e);
         }
@@ -401,6 +401,11 @@ function formatDateFull(dateStr) {
 
 function todayStr() {
     return formatDateFull(new Date().toISOString());
+}
+
+function nowTimeStr() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 function getMonthKey(dateStr) {
@@ -745,6 +750,7 @@ function openTransactionModal(id) {
         state.selectedCategoryId = t.categoryId;
         document.getElementById('amountInput').value = t.amount;
         document.getElementById('dateInput').value = t.date;
+        document.getElementById('timeInput').value = t.time || nowTimeStr();
         document.getElementById('noteInput').value = t.note || '';
         renderPaymentOptions(t.paymentMethod);
     } else {
@@ -754,6 +760,7 @@ function openTransactionModal(id) {
         state.selectedCategoryId = null;
         document.getElementById('amountInput').value = '';
         document.getElementById('dateInput').value = todayStr();
+        document.getElementById('timeInput').value = nowTimeStr();
         document.getElementById('noteInput').value = '';
         renderPaymentOptions();
     }
@@ -913,6 +920,7 @@ function saveTransaction() {
             t.amount = amount;
             t.categoryId = state.selectedCategoryId;
             t.date = date;
+            t.time = document.getElementById('timeInput').value || nowTimeStr();
             t.note = note;
             t.paymentMethod = paymentMethod;
             t.updatedAt = Date.now();
@@ -925,6 +933,7 @@ function saveTransaction() {
             amount,
             categoryId: state.selectedCategoryId,
             date,
+            time: document.getElementById('timeInput').value || nowTimeStr(),
             note,
             paymentMethod,
             createdAt: Date.now(),
@@ -1360,9 +1369,8 @@ function renderCategories() {
 
     const catCardHTML = (c) => {
         const count = state.transactions.filter(t => t.categoryId === c.id).length;
-        const isDefault = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES].some(d => d.id === c.id);
         return `
-            <div class="category-card">
+            <div class="category-card" data-id="${c.id}" data-type="${c.type}">
                 <div class="category-card-icon" style="background:${c.color}22;color:${c.color}">
                     <i class="fa-solid ${c.icon}"></i>
                 </div>
@@ -1370,7 +1378,6 @@ function renderCategories() {
                     <div class="category-card-name">${c.name}</div>
                     <div class="category-card-count">${count} 笔交易</div>
                 </div>
-                ${!isDefault ? `<button class="category-card-delete" onclick="deleteCategory('${c.id}')" title="删除"><i class="fa-solid fa-xmark"></i></button>` : ''}
             </div>
         `;
     };
@@ -1455,6 +1462,7 @@ function saveCategory() {
             c.name = name;
             c.icon = state.selectedIcon;
             c.color = state.selectedColor;
+            c.type = state.selectedCategoryType;
         }
         showToast('分类已更新', 'success');
     } else {
@@ -1473,17 +1481,265 @@ function saveCategory() {
     renderCategories();
 }
 
+function moveCategory(id, direction) {
+    const idx = state.categories.findIndex(c => c.id === id);
+    if (idx === -1) return;
+    const cat = state.categories[idx];
+
+    // Find adjacent category of the same type
+    let targetIdx = -1;
+    if (direction === 'up') {
+        for (let i = idx - 1; i >= 0; i--) {
+            if (state.categories[i].type === cat.type) { targetIdx = i; break; }
+        }
+    } else {
+        for (let i = idx + 1; i < state.categories.length; i++) {
+            if (state.categories[i].type === cat.type) { targetIdx = i; break; }
+        }
+    }
+    if (targetIdx === -1) return; // already at boundary
+
+    // Swap positions
+    [state.categories[idx], state.categories[targetIdx]] = [state.categories[targetIdx], state.categories[idx]];
+    saveState();
+    renderCategories();
+}
+
 function deleteCategory(id) {
+    const cat = state.categories.find(c => c.id === id);
+    if (!cat) return;
     const count = state.transactions.filter(t => t.categoryId === id).length;
     if (count > 0) {
         showToast(`该分类下有 ${count} 笔交易，无法删除`, 'error');
         return;
     }
+    const sameTypeCount = state.categories.filter(c => c.type === cat.type).length;
+    if (sameTypeCount <= 1) {
+        showToast(cat.type === 'income' ? '至少保留一个收入分类' : '至少保留一个支出分类', 'error');
+        return;
+    }
+    if (!confirm(`确定删除分类「${cat.name}」吗？`)) return;
     state.categories = state.categories.filter(c => c.id !== id);
     state.budgets = state.budgets.filter(b => b.categoryId !== id);
     saveState();
     renderCategories();
     showToast('分类已删除', 'success');
+}
+
+// ---- Category action sheet (tap) & drag-to-reorder (long press) ----
+let catSheetId = null;
+let catDrag = null;          // active drag session
+let catPress = null;         // pending long press
+let catSuppressClick = false;
+
+function openCatActionSheet(id) {
+    const c = state.categories.find(x => x.id === id);
+    if (!c) return;
+    catSheetId = id;
+    const icon = document.getElementById('catSheetIcon');
+    icon.style.background = c.color + '22';
+    icon.style.color = c.color;
+    icon.innerHTML = `<i class="fa-solid ${c.icon}"></i>`;
+    document.getElementById('catSheetTitle').textContent = c.name;
+    document.getElementById('catActionSheet').classList.remove('hidden');
+}
+
+function closeCatActionSheet() {
+    document.getElementById('catActionSheet').classList.add('hidden');
+    catSheetId = null;
+}
+
+function catSheetEdit() {
+    const id = catSheetId;
+    closeCatActionSheet();
+    if (id) openCategoryModal(id);
+}
+
+function catSheetMove(direction) {
+    const id = catSheetId;
+    closeCatActionSheet();
+    if (id) moveCategory(id, direction);
+}
+
+function catSheetDelete() {
+    const id = catSheetId;
+    closeCatActionSheet();
+    if (id) deleteCategory(id);
+}
+
+function catCardFromEvent(e) {
+    let el = e.target;
+    while (el && el !== document) {
+        if (el.classList && el.classList.contains('category-card') && el.dataset && el.dataset.id) return el;
+        el = el.parentElement;
+    }
+    return null;
+}
+
+function onCatListClick(e) {
+    if (catSuppressClick) { catSuppressClick = false; return; }
+    const card = catCardFromEvent(e);
+    if (card) openCatActionSheet(card.dataset.id);
+}
+
+// Long press = 450ms hold without moving
+const CAT_PRESS_MS = 450;
+const CAT_MOVE_TOLERANCE = 10;
+
+function onCatTouchStart(e) {
+    if (catDrag) return;
+    const card = catCardFromEvent(e);
+    if (!card) return;
+    const t = e.touches[0];
+    catPress = { card, x: t.clientX, y: t.clientY, timer: null };
+    catPress.timer = setTimeout(() => startCatDrag(t.clientX, t.clientY), CAT_PRESS_MS);
+}
+
+function onCatTouchMove(e) {
+    if (catDrag) {
+        e.preventDefault();
+        const t = e.touches[0];
+        moveCatDrag(t.clientX, t.clientY);
+        return;
+    }
+    if (!catPress) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - catPress.x) > CAT_MOVE_TOLERANCE ||
+        Math.abs(t.clientY - catPress.y) > CAT_MOVE_TOLERANCE) {
+        clearTimeout(catPress.timer);
+        catPress = null;
+    }
+}
+
+function onCatTouchEnd() {
+    if (catDrag) { endCatDrag(); return; }
+    if (catPress) { clearTimeout(catPress.timer); catPress = null; }
+}
+
+function onCatMouseDown(e) {
+    if (catDrag || e.button !== 0) return;
+    const card = catCardFromEvent(e);
+    if (!card) return;
+    catPress = { card, x: e.clientX, y: e.clientY, timer: null };
+    catPress.timer = setTimeout(() => startCatDrag(e.clientX, e.clientY), CAT_PRESS_MS);
+}
+
+function onCatMouseMove(e) {
+    if (catDrag) { moveCatDrag(e.clientX, e.clientY); return; }
+    if (!catPress) return;
+    if (Math.abs(e.clientX - catPress.x) > 5 || Math.abs(e.clientY - catPress.y) > 5) {
+        clearTimeout(catPress.timer);
+        catPress = null;
+    }
+}
+
+function onCatMouseUp() {
+    if (catDrag) { endCatDrag(); return; }
+    if (catPress) { clearTimeout(catPress.timer); catPress = null; }
+}
+
+function startCatDrag(clientX, clientY) {
+    if (!catPress) return;
+    const card = catPress.card;
+    catPress = null;
+    const list = card.parentElement;
+    if (!list) return;
+    const rect = card.getBoundingClientRect();
+
+    // Floating clone that follows the finger / cursor
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('cat-drag-ghost');
+    ghost.style.width = rect.width + 'px';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    document.body.appendChild(ghost);
+
+    // Placeholder marks the drop slot in the list
+    const placeholder = document.createElement('div');
+    placeholder.className = 'cat-drag-placeholder';
+    placeholder.style.height = rect.height + 'px';
+    list.insertBefore(placeholder, card);
+    card.style.display = 'none';
+
+    catDrag = {
+        id: card.dataset.id,
+        type: card.dataset.type,
+        list,
+        ghost,
+        placeholder,
+        offX: clientX - rect.left,
+        offY: clientY - rect.top
+    };
+    document.body.classList.add('cat-dragging');
+    try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) { /* ignore */ }
+}
+
+function moveCatDrag(x, y) {
+    if (!catDrag) return;
+    catDrag.ghost.style.left = (x - catDrag.offX) + 'px';
+    catDrag.ghost.style.top = (y - catDrag.offY) + 'px';
+
+    // Move placeholder to the slot under the finger (same list only)
+    const cards = Array.from(catDrag.list.querySelectorAll('.category-card'))
+        .filter(el => el.dataset.id !== catDrag.id);
+    for (const el of cards) {
+        const r = el.getBoundingClientRect();
+        if (y < r.top + r.height / 2) {
+            catDrag.list.insertBefore(catDrag.placeholder, el);
+            return;
+        }
+    }
+    catDrag.list.appendChild(catDrag.placeholder);
+}
+
+function endCatDrag() {
+    if (!catDrag) return;
+    const { id, type, list, ghost, placeholder } = catDrag;
+
+    // Which card comes right after the drop slot? (skip the hidden source card)
+    let nextEl = placeholder.nextElementSibling;
+    if (nextEl && nextEl.dataset && nextEl.dataset.id === id) nextEl = nextEl.nextElementSibling;
+    const nextId = (nextEl && nextEl.dataset && nextEl.dataset.id) ? nextEl.dataset.id : null;
+
+    ghost.remove();
+    placeholder.remove();
+    document.body.classList.remove('cat-dragging');
+
+    // Rebuild the order of this type's categories
+    const ids = state.categories.filter(c => c.type === type).map(c => c.id);
+    const newIds = ids.filter(i => i !== id);
+    let insertAt = newIds.length;
+    if (nextId) {
+        const idx = newIds.indexOf(nextId);
+        if (idx !== -1) insertAt = idx;
+    }
+    newIds.splice(insertAt, 0, id);
+
+    const byId = {};
+    state.categories.forEach(c => { byId[c.id] = c; });
+    let k = 0;
+    state.categories = state.categories.map(c => c.type === type ? byId[newIds[k++]] : c);
+
+    catDrag = null;
+    catSuppressClick = true; // swallow the click that follows pointerup
+    saveState();
+    renderCategories();
+    showToast('分类顺序已更新', 'success');
+}
+
+function initCategoryInteractions() {
+    ['expenseCategories', 'incomeCategories'].forEach(listId => {
+        const list = document.getElementById(listId);
+        if (!list) return;
+        list.addEventListener('click', onCatListClick);
+        list.addEventListener('touchstart', onCatTouchStart, { passive: true });
+        list.addEventListener('touchmove', onCatTouchMove, { passive: false });
+        list.addEventListener('touchend', onCatTouchEnd);
+        list.addEventListener('touchcancel', onCatTouchEnd);
+        list.addEventListener('mousedown', onCatMouseDown);
+    });
+    document.addEventListener('mousemove', onCatMouseMove);
+    document.addEventListener('mouseup', onCatMouseUp);
 }
 
 // ---- Settings ----
@@ -1494,6 +1750,8 @@ function renderSettings() {
     });
     const dvSelect = document.getElementById('defaultViewSelect');
     if (dvSelect) dvSelect.value = state.settings.defaultView || 'dashboard';
+    const autoToggle = document.getElementById('autoOpenAddToggle');
+    if (autoToggle) autoToggle.checked = !!state.settings.autoOpenAdd;
     updateICloudSyncUI();
 }
 
@@ -1512,6 +1770,12 @@ function setDefaultView(view) {
     showToast('已设置默认打开页面', 'success');
 }
 
+function setAutoOpenAdd(enabled) {
+    state.settings.autoOpenAdd = enabled;
+    saveState();
+    showToast(enabled ? '已开启启动自动弹出记一笔' : '已关闭启动自动弹出', 'success');
+}
+
 // ---- Data Export/Import (Excel) ----
 function exportData() {
     if (typeof XLSX === 'undefined') {
@@ -1528,6 +1792,7 @@ function exportData() {
             const cat = getCategoryById(t.categoryId);
             return {
                 '日期': t.date,
+                '时间': t.time || '',
                 '类型': t.type === 'income' ? '收入' : '支出',
                 '分类': cat?.name || '未知',
                 '金额': t.amount,
@@ -1536,7 +1801,7 @@ function exportData() {
             };
         });
         const ws1 = XLSX.utils.json_to_sheet(txnData);
-        ws1['!cols'] = [{wch:14},{wch:8},{wch:12},{wch:14},{wch:12},{wch:24}];
+        ws1['!cols'] = [{wch:14},{wch:10},{wch:8},{wch:12},{wch:14},{wch:12},{wch:24}];
         XLSX.utils.book_append_sheet(wb, ws1, '交易记录');
 
         // Sheet 2: Categories
@@ -1623,6 +1888,7 @@ function importData(event) {
                         amount: parseFloat(row['金额']) || 0,
                         categoryId: cat?.id || (typeStr === '收入' ? 'i_other' : 'e_other'),
                         date: row['日期'] || todayStr(),
+                        time: row['时间'] || '',
                         note: row['备注'] || '',
                         paymentMethod: row['支付方式'] || '现金',
                         createdAt: Date.now(),
@@ -1877,12 +2143,18 @@ function init() {
     loadState();
     document.documentElement.setAttribute('data-theme', state.settings.theme);
     initEventListeners();
+    initCategoryInteractions();
     switchView(state.settings.defaultView || 'dashboard');
 
     // Auto-load sample data on first visit
     if (state.transactions.length === 0 && !localStorage.getItem(STORAGE_KEY + '_visited')) {
         localStorage.setItem(STORAGE_KEY + '_visited', '1');
         loadSampleData();
+    }
+
+    // Auto-open transaction modal on launch if enabled
+    if (state.settings.autoOpenAdd) {
+        setTimeout(() => openTransactionModal(), 300);
     }
 
     // Initialize iCloud sync
