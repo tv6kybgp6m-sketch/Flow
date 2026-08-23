@@ -50,8 +50,8 @@ let state = {
     categories: [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES],
     budgets: [],
     paymentMethods: [...DEFAULT_PAYMENT_METHODS],
-    settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard', autoOpenAdd: false },
-    currentView: 'dashboard',
+    settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false },
+    currentView: 'transactions',
     transactionFilter: 'all',
     searchQuery: '',
     monthFilter: '',
@@ -362,7 +362,9 @@ function loadState() {
             state.paymentMethods = (data.paymentMethods && data.paymentMethods.length > 0)
                 ? data.paymentMethods
                 : [...DEFAULT_PAYMENT_METHODS];
-            state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'dashboard', autoOpenAdd: false }, ...data.settings };
+            state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
+            // 仪表盘页面已移除：旧设置迁移到交易记录
+            if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
         } catch (e) {
             console.error('Failed to load state:', e);
         }
@@ -464,7 +466,6 @@ function switchView(viewName) {
 
 function renderView(viewName) {
     switch (viewName) {
-        case 'dashboard': renderDashboard(); break;
         case 'transactions': renderTransactions(); break;
         case 'reports': renderReports(); break;
         case 'budget': renderBudget(); break;
@@ -473,57 +474,20 @@ function renderView(viewName) {
     }
 }
 
-// ---- Dashboard ----
-function renderDashboard() {
+// ---- Sidebar summary (desktop sidebar month card) ----
+function updateSidebarSummary() {
+    const si = document.getElementById('sidebarIncome');
+    if (!si) return;
     const monthKey = getCurrentMonthKey();
     const monthTxns = state.transactions.filter(t => getMonthKey(t.date) === monthKey);
     const income = monthTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const expense = monthTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     const balance = income - expense;
-    const savingsRate = income > 0 ? Math.round((balance / income) * 100) : 0;
 
-    document.getElementById('dashIncome').textContent = formatCurrency(income);
-    document.getElementById('dashExpense').textContent = formatCurrency(expense);
-    document.getElementById('dashBalance').textContent = formatCurrency(balance);
-    document.getElementById('dashSavingsRate').textContent = savingsRate + '%';
-
-    // Sidebar
-    document.getElementById('sidebarIncome').textContent = formatCurrency(income);
+    si.textContent = formatCurrency(income);
     document.getElementById('sidebarExpense').textContent = formatCurrency(expense);
     document.getElementById('sidebarBalance').textContent = formatCurrency(balance);
-
-    // Today date
-    const today = new Date();
-    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
-    document.getElementById('todayDate').textContent =
-        `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日 ${weekdays[today.getDay()]}`;
     document.getElementById('sidebarMonth').textContent = getMonthLabel(monthKey);
-
-    // Trend chart (6 months)
-    renderTrendChart();
-    // Category chart
-    renderCategoryChart();
-
-    // Recent transactions
-    const recent = [...state.transactions].sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt).slice(0, 6);
-    const container = document.getElementById('recentTransactions');
-    if (recent.length === 0) {
-        container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-tertiary);font-size:14px;">暂无交易记录，点击右上角按钮记一笔</div>';
-    } else {
-        container.innerHTML = recent.map(t => transactionItemHTML(t)).join('');
-    }
-
-    // Mobile budget card description
-    const mobileBudgetDesc = document.getElementById('mobileBudgetDesc');
-    if (mobileBudgetDesc) {
-        const totalBudget = state.budgets.reduce((s, b) => s + b.amount, 0);
-        if (totalBudget > 0) {
-            const usedPct = Math.round((expense / totalBudget) * 100);
-            mobileBudgetDesc.textContent = `本月已用 ${formatCurrency(expense)} / ${formatCurrency(totalBudget)} (${usedPct}%)`;
-        } else {
-            mobileBudgetDesc.textContent = '点击设置月度预算';
-        }
-    }
 }
 
 function renderTrendChart() {
@@ -1749,7 +1713,7 @@ function renderSettings() {
         btn.classList.toggle('active', btn.dataset.theme === state.settings.theme);
     });
     const dvSelect = document.getElementById('defaultViewSelect');
-    if (dvSelect) dvSelect.value = state.settings.defaultView || 'dashboard';
+    if (dvSelect) dvSelect.value = state.settings.defaultView || 'transactions';
     const autoToggle = document.getElementById('autoOpenAddToggle');
     if (autoToggle) autoToggle.checked = !!state.settings.autoOpenAdd;
     updateICloudSyncUI();
@@ -1760,7 +1724,6 @@ function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     saveState();
     // Re-render charts with new colors
-    if (state.currentView === 'dashboard') renderDashboard();
     if (state.currentView === 'reports') renderReports();
 }
 
@@ -2144,7 +2107,7 @@ function init() {
     document.documentElement.setAttribute('data-theme', state.settings.theme);
     initEventListeners();
     initCategoryInteractions();
-    switchView(state.settings.defaultView || 'dashboard');
+    switchView(state.settings.defaultView || 'transactions');
 
     // Auto-load sample data on first visit
     if (state.transactions.length === 0 && !localStorage.getItem(STORAGE_KEY + '_visited')) {
