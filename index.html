@@ -32,11 +32,7 @@
             <!-- Sidebar -->
             <aside class="sidebar">
                 <nav class="nav-menu">
-                    <a class="nav-item active" data-view="dashboard">
-                        <i class="fa-solid fa-house"></i>
-                        <span>仪表盘</span>
-                    </a>
-                    <a class="nav-item" data-view="transactions">
+                    <a class="nav-item active" data-view="transactions">
                         <i class="fa-solid fa-list-ul"></i>
                         <span>交易记录</span>
                     </a>
@@ -44,7 +40,7 @@
                         <i class="fa-solid fa-chart-pie"></i>
                         <span>报表分析</span>
                     </a>
-                    <a class="nav-item nav-item-desktop-only" data-view="budget">
+                    <a class="nav-item" data-view="budget">
                         <i class="fa-solid fa-wallet"></i>
                         <span>预算管理</span>
                     </a>
@@ -74,87 +70,19 @@
 
             <!-- Main Content -->
             <main class="main-content">
-                <!-- Dashboard View -->
-                <section class="view active" id="view-dashboard">
-                    <div class="view-header">
-                        <h1>仪表盘</h1>
-                        <div class="date-display" id="todayDate"></div>
-                    </div>
-                    <div class="stat-cards">
-                        <div class="stat-card stat-income">
-                            <div class="stat-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
-                            <div class="stat-info">
-                                <div class="stat-label">本月收入</div>
-                                <div class="stat-value" id="dashIncome">¥0.00</div>
-                            </div>
-                        </div>
-                        <div class="stat-card stat-expense">
-                            <div class="stat-icon"><i class="fa-solid fa-arrow-trend-down"></i></div>
-                            <div class="stat-info">
-                                <div class="stat-label">本月支出</div>
-                                <div class="stat-value" id="dashExpense">¥0.00</div>
-                            </div>
-                        </div>
-                        <div class="stat-card stat-balance">
-                            <div class="stat-icon"><i class="fa-solid fa-scale-balanced"></i></div>
-                            <div class="stat-info">
-                                <div class="stat-label">本月结余</div>
-                                <div class="stat-value" id="dashBalance">¥0.00</div>
-                            </div>
-                        </div>
-                        <div class="stat-card stat-savings">
-                            <div class="stat-icon"><i class="fa-solid fa-piggy-bank"></i></div>
-                            <div class="stat-info">
-                                <div class="stat-label">储蓄率</div>
-                                <div class="stat-value" id="dashSavingsRate">0%</div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Mobile-only budget quick access -->
-                    <div class="mobile-budget-card" onclick="switchView('budget')">
-                        <div class="mobile-budget-icon"><i class="fa-solid fa-wallet"></i></div>
-                        <div class="mobile-budget-info">
-                            <div class="mobile-budget-title">预算管理</div>
-                            <div class="mobile-budget-desc" id="mobileBudgetDesc">点击查看预算使用情况</div>
-                        </div>
-                        <i class="fa-solid fa-chevron-right mobile-budget-arrow"></i>
-                    </div>
-                    <div class="dash-charts">
-                        <div class="chart-card chart-wide">
-                            <div class="chart-header">
-                                <h3>收支趋势</h3>
-                                <span class="chart-subtitle">近6个月</span>
-                            </div>
-                            <div class="chart-container">
-                                <canvas id="trendChart"></canvas>
-                            </div>
-                        </div>
-                        <div class="chart-card">
-                            <div class="chart-header">
-                                <h3>支出分类</h3>
-                                <span class="chart-subtitle">本月</span>
-                            </div>
-                            <div class="chart-container">
-                                <canvas id="categoryChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="recent-section">
-                        <div class="section-header">
-                            <h3>最近交易</h3>
-                            <button class="link-btn" data-goto="transactions">查看全部 <i class="fa-solid fa-chevron-right"></i></button>
-                        </div>
-                        <div class="transaction-list" id="recentTransactions"></div>
-                    </div>
-                </section>
-
                 <!-- Transactions View -->
-                <section class="view" id="view-transactions">
+                <section class="view active" id="view-transactions">
                     <div class="view-header">
                         <h1>交易记录</h1>
-                        <button class="primary-btn" onclick="openTransactionModal()">
-                            <i class="fa-solid fa-plus"></i> 记一笔
-                        </button>
+                        <div class="view-header-right">
+                            <div class="search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="searchInput" placeholder="搜索交易备注...">
+                            </div>
+                            <button class="primary-btn" onclick="openTransactionModal()">
+                                <i class="fa-solid fa-plus"></i> 记一笔
+                            </button>
+                        </div>
                     </div>
                     <!-- Mobile floating add button -->
                     <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
@@ -167,10 +95,6 @@
                             <button class="filter-tab" data-filter="income">收入</button>
                         </div>
                         <div class="filter-right">
-                            <div class="search-box">
-                                <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="text" id="searchInput" placeholder="搜索交易备注...">
-                            </div>
                             <select class="filter-select" id="monthFilter">
                                 <option value="">所有月份</option>
                             </select>
@@ -338,9 +262,9 @@
                             <div class="settings-row">
                                 <div class="settings-label">默认打开页面<div class="settings-sublabel">启动时自动进入的页面</div></div>
                                 <select class="settings-select" id="defaultViewSelect" onchange="setDefaultView(this.value)">
-                                    <option value="dashboard">仪表盘</option>
                                     <option value="transactions">交易记录</option>
                                     <option value="reports">报表分析</option>
+                                    <option value="budget">预算管理</option>
                                 </select>
                             </div>
                             <div class="settings-row">
