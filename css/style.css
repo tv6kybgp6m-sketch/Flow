@@ -313,6 +313,12 @@ body {
     letter-spacing: -0.5px;
 }
 
+.view-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
 .date-display {
     font-size: 14px;
     color: var(--text-secondary);
@@ -2073,9 +2079,15 @@ body.cat-dragging {
     .view-header h1 { font-size: 22px; }
     .view-header {
         flex-direction: column;
-        align-items: flex-start;
+        align-items: stretch;
         gap: 8px;
     }
+    .view-header-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+    .view-header-right .search-box { flex: 1; }
+    .view-header-right .search-box input { width: 100%; }
 
     /* Cards & grids */
     .stat-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
