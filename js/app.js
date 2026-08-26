@@ -472,6 +472,8 @@ function renderView(viewName) {
         case 'categories': renderCategories(); break;
         case 'settings': renderSettings(); break;
     }
+    // Sidebar month summary always reflects current month regardless of active view
+    updateSidebarSummary();
 }
 
 // ---- Sidebar summary (desktop sidebar month card) ----
@@ -654,6 +656,7 @@ function transactionItemHTML(t) {
 
 function renderTransactions() {
     updateMonthFilter();
+    updateTransactionMonthSummary();
 
     let filtered = [...state.transactions];
 
@@ -700,6 +703,21 @@ function updateMonthFilter() {
         months.map(m => `<option value="${m}" ${m === current ? 'selected' : ''}>${getMonthLabel(m)}</option>`).join('');
 }
 
+// Top-of-page month summary (income / expense / balance for current month)
+function updateTransactionMonthSummary() {
+    const card = document.getElementById('txnMonthSummary');
+    if (!card) return;
+    const monthKey = getCurrentMonthKey();
+    const monthTxns = state.transactions.filter(t => getMonthKey(t.date) === monthKey);
+    const income = monthTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const expense = monthTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const balance = income - expense;
+
+    document.getElementById('tmsIncome').textContent = formatCurrency(income);
+    document.getElementById('tmsExpense').textContent = formatCurrency(expense);
+    document.getElementById('tmsBalance').textContent = formatCurrency(balance);
+}
+
 // ---- Transaction Modal ----
 function openTransactionModal(id) {
     const modal = document.getElementById('transactionModal');
@@ -712,7 +730,7 @@ function openTransactionModal(id) {
         title.textContent = '编辑交易';
         state.selectedTransactionType = t.type;
         state.selectedCategoryId = t.categoryId;
-        document.getElementById('amountInput').value = t.amount;
+        setCalcValue(String(t.amount));
         document.getElementById('dateInput').value = t.date;
         document.getElementById('timeInput').value = t.time || nowTimeStr();
         document.getElementById('noteInput').value = t.note || '';
@@ -722,7 +740,7 @@ function openTransactionModal(id) {
         title.textContent = '记一笔';
         state.selectedTransactionType = 'expense';
         state.selectedCategoryId = null;
-        document.getElementById('amountInput').value = '';
+        resetCalc();
         document.getElementById('dateInput').value = todayStr();
         document.getElementById('timeInput').value = nowTimeStr();
         document.getElementById('noteInput').value = '';
@@ -744,16 +762,151 @@ function openTransactionModal(id) {
     renderCategoryPicker();
 
     modal.classList.remove('hidden');
-    // Focus immediately (within the user-gesture) so iOS pops the numeric keyboard
-    const amountEl = document.getElementById('amountInput');
-    amountEl.focus();
-    if (!id && amountEl.select) amountEl.select();
+    // Amount is now entered via the custom number pad below; no system keyboard needed
 }
 
 function closeTransactionModal() {
     document.getElementById('transactionModal').classList.add('hidden');
     state.editingTransactionId = null;
     state.selectedCategoryId = null;
+}
+
+// ---- Custom Calculator-style Number Pad ----
+// State for the in-modal calculator: tracks the running expression so + / - can chain
+const calc = {
+    expr: '',      // running expression text, e.g. "10+20-5"
+    justOp: false, // true if the last input was an operator (so the next digit starts fresh)
+};
+
+function resetCalc() {
+    calc.expr = '';
+    calc.justOp = false;
+    renderCalc();
+}
+
+function setCalcValue(amount) {
+    // Used when editing an existing transaction: prefill with the stored amount
+    calc.expr = String(amount);
+    calc.justOp = false;
+    renderCalc();
+}
+
+function renderCalc() {
+    const display = document.getElementById('amountInput');
+    const exprEl = document.getElementById('amountExpression');
+    const hidden = document.getElementById('amountValue');
+    if (!display) return;
+
+    // Compute the value that should appear in the big display
+    let shown;
+    if (!calc.expr) {
+        shown = '';
+    } else {
+        // If the last char is an operator, evaluate so far to show running result
+        const last = calc.expr[calc.expr.length - 1];
+        if (last === '+' || last === '-') {
+            shown = String(safeEval(calc.expr.slice(0, -1)));
+        } else {
+            shown = String(safeEval(calc.expr));
+        }
+    }
+    display.value = shown;
+
+    // Expression line shows the full expression (e.g. "10+20-5 = 25")
+    const evaluated = (() => {
+        if (!calc.expr) return '';
+        const last = calc.expr[calc.expr.length - 1];
+        if (last === '+' || last === '-') return '';
+        const v = safeEval(calc.expr);
+        if (isNaN(v) || !isFinite(v)) return '';
+        return calc.expr + ' = ' + formatNum(v);
+    })();
+    exprEl.textContent = evaluated;
+
+    // Hidden field stores the final numeric value used by saveTransaction()
+    const finalVal = shown && !isNaN(parseFloat(shown)) ? parseFloat(shown) : 0;
+    hidden.value = finalVal;
+}
+
+function safeEval(expr) {
+    // Only allow digits, decimal points, and + / - operators
+    if (!/^[\d+\-.\s]+$/.test(expr)) return NaN;
+    try {
+        // eslint-disable-next-line no-new-func
+        return Function('"use strict"; return (' + expr + ')')();
+    } catch (e) {
+        return NaN;
+    }
+}
+
+function formatNum(n) {
+    // Trim trailing zeros for a clean display (e.g. 25 not 25.0)
+    if (Number.isInteger(n)) return String(n);
+    return n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function numpadPress(key) {
+    if (key === '.') {
+        // Add decimal only if the current number segment doesn't already have one
+        const seg = currentSegment();
+        if (seg.includes('.')) return;
+        if (calc.justOp || !calc.expr) {
+            calc.expr += (calc.expr && calc.justOp ? '' : '0.');
+            calc.justOp = false;
+        } else {
+            calc.expr += '.';
+        }
+    } else if (key === '+' || key === '-') {
+        if (!calc.expr) return; // need a number first
+        const last = calc.expr[calc.expr.length - 1];
+        if (last === '+' || last === '-') {
+            // Replace the previous operator
+            calc.expr = calc.expr.slice(0, -1) + key;
+        } else {
+            calc.expr += key;
+        }
+        calc.justOp = true;
+    } else {
+        // Digit
+        if (calc.justOp) {
+            // Start a new number after an operator
+            calc.expr += key;
+            calc.justOp = false;
+        } else {
+            // Avoid leading zeros (except "0.")
+            const seg = currentSegment();
+            if (seg === '0') {
+                calc.expr = calc.expr.slice(0, -1) + key;
+            } else {
+                calc.expr += key;
+            }
+        }
+    }
+    renderCalc();
+}
+
+function currentSegment() {
+    // The numeric segment after the last operator
+    const m = calc.expr.match(/[+\-](?!.*[+\-])$/);
+    return m ? calc.expr.slice(m.index + 1) : calc.expr;
+}
+
+function numpadBack() {
+    if (!calc.expr) return;
+    const last = calc.expr[calc.expr.length - 1];
+    calc.expr = calc.expr.slice(0, -1);
+    // After a backspace the user is in the middle of a number, not after an operator
+    calc.justOp = (last === '+' || last === '-');
+    renderCalc();
+}
+
+function numpadClear() {
+    resetCalc();
+}
+
+function numpadQuickSave() {
+    // Save the current transaction and immediately prepare for the next entry
+    saveTransaction({ reopen: true });
 }
 
 function renderPaymentOptions(selected) {
@@ -858,8 +1011,9 @@ function selectCategory(id) {
     renderCategoryPicker();
 }
 
-function saveTransaction() {
-    const amount = parseFloat(document.getElementById('amountInput').value);
+function saveTransaction(opts = {}) {
+    // Read the evaluated amount from the hidden field managed by the custom numpad
+    const amount = parseFloat(document.getElementById('amountValue').value);
     const date = document.getElementById('dateInput').value;
     const note = document.getElementById('noteInput').value.trim();
     const paymentMethod = document.getElementById('paymentInput').value;
@@ -902,12 +1056,22 @@ function saveTransaction() {
             paymentMethod,
             createdAt: Date.now(),
         });
-        showToast('交易已添加', 'success');
+        showToast(opts.reopen ? '已保存，继续记下一笔' : '交易已添加', 'success');
     }
 
     saveState();
-    closeTransactionModal();
-    renderView(state.currentView);
+
+    if (opts.reopen) {
+        // Quick-save mode: keep modal open, reset the calculator and note for the next entry
+        resetCalc();
+        document.getElementById('noteInput').value = '';
+        document.getElementById('timeInput').value = nowTimeStr();
+        // Re-render to update the list behind the modal
+        renderView(state.currentView);
+    } else {
+        closeTransactionModal();
+        renderView(state.currentView);
+    }
 }
 
 function editTransaction(id) {
@@ -2071,6 +2235,12 @@ function initEventListeners() {
         });
     });
 
+    // Custom number pad: numbers, decimal, operators, backspace
+    document.querySelectorAll('.numpad-num, .numpad-op').forEach(btn => {
+        btn.addEventListener('click', () => numpadPress(btn.dataset.key));
+    });
+    document.getElementById('numpadBack').addEventListener('click', numpadBack);
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         // Cmd+N / Ctrl+N: Quick add (jumps to transactions view)
@@ -2083,9 +2253,22 @@ function initEventListeners() {
         if (e.key === 'Escape') {
             document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
         }
-        // Enter in amount input: Save
-        if (e.key === 'Enter' && document.activeElement?.id === 'amountInput') {
+        // Enter in note input: Save (works since amount input is now readonly)
+        if (e.key === 'Enter' && document.activeElement?.id === 'noteInput') {
             saveTransaction();
+        }
+        // Numeric / operator keys when the transaction modal is open
+        if (!document.getElementById('transactionModal').classList.contains('hidden')) {
+            if (/^[0-9.+\-]$/.test(e.key)) {
+                e.preventDefault();
+                numpadPress(e.key);
+            } else if (e.key === 'Backspace') {
+                e.preventDefault();
+                numpadBack();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                saveTransaction();
+            }
         }
     });
 
