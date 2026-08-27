@@ -374,8 +374,9 @@ function loadState() {
 // ---- Utils ----
 function formatCurrency(amount) {
     const sym = state.settings.currency || '¥';
+    const sign = amount < 0 ? '-' : '';
     const abs = Math.abs(amount);
-    return sym + abs.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return sign + sym + abs.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatDate(dateStr) {
@@ -391,9 +392,10 @@ function formatDate(dateStr) {
     if (dOnly.getTime() === today.getTime()) return '今天';
     if (dOnly.getTime() === yesterday.getTime()) return '昨天';
 
+    const year = d.getFullYear();
     const month = d.getMonth() + 1;
     const day = d.getDate();
-    return `${month}月${day}日`;
+    return `${year}年${month}月${day}日`;
 }
 
 function formatDateFull(dateStr) {
@@ -1974,6 +1976,31 @@ function exportData() {
     }
 }
 
+function normalizeImportDate(v) {
+    if (v == null || v === '') return todayStr();
+    if (v instanceof Date && !isNaN(v.getTime())) {
+        return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+    }
+    if (typeof v === 'number' && isFinite(v)) {
+        // Excel serial date: days since 1899-12-30
+        const ms = Math.round((v - 25569) * 86400000);
+        const d = new Date(ms);
+        if (!isNaN(d.getTime()) && v > 20000 && v < 80000) {
+            return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+        }
+        return todayStr();
+    }
+    const s = String(v).trim();
+    // 2017-01-05 / 2017/1/5 / 2017.01.05 / 2017年1月5日
+    const m = s.match(/^(\d{4})[-\/.年]\s*(\d{1,2})[-\/.月]\s*(\d{1,2})日?$/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    return todayStr();
+}
+
 function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1986,7 +2013,7 @@ function importData(event) {
     reader.onload = (e) => {
         try {
             const data = new Uint8Array(e.target.result);
-            const wb = XLSX.read(data, { type: 'array' });
+            const wb = XLSX.read(data, { type: 'array', cellDates: true });
 
             // Parse categories first (transactions reference them)
             const ws2 = wb.Sheets['分类'];
@@ -2014,7 +2041,7 @@ function importData(event) {
                         type: typeStr === '收入' ? 'income' : 'expense',
                         amount: parseFloat(row['金额']) || 0,
                         categoryId: cat?.id || (typeStr === '收入' ? 'i_other' : 'e_other'),
-                        date: row['日期'] || todayStr(),
+                        date: normalizeImportDate(row['日期']),
                         time: row['时间'] || '',
                         note: row['备注'] || '',
                         paymentMethod: row['支付方式'] || '现金',
