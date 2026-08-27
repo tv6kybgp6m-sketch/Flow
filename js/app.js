@@ -6,24 +6,50 @@
 const DEFAULT_EXPENSE_CATEGORIES = [
     { id: 'e_food', name: '餐饮', icon: 'fa-utensils', color: '#ff6b6b', type: 'expense' },
     { id: 'e_transport', name: '交通', icon: 'fa-car', color: '#4ecdc4', type: 'expense' },
-    { id: 'e_shopping', name: '购物', icon: 'fa-bag-shopping', color: '#ff9ff3', type: 'expense' },
-    { id: 'e_grocery', name: '日用', icon: 'fa-basket-shopping', color: '#feca57', type: 'expense' },
-    { id: 'e_entertain', name: '娱乐', icon: 'fa-gamepad', color: '#a29bfe', type: 'expense' },
-    { id: 'e_housing', name: '住房', icon: 'fa-house', color: '#fd79a8', type: 'expense' },
-    { id: 'e_medical', name: '医疗', icon: 'fa-briefcase-medical', color: '#e17055', type: 'expense' },
-    { id: 'e_education', name: '教育', icon: 'fa-graduation-cap', color: '#6c5ce7', type: 'expense' },
-    { id: 'e_comm', name: '通讯', icon: 'fa-mobile-screen', color: '#00cec9', type: 'expense' },
+    { id: 'e_renqing', name: '人情', icon: 'fa-hand-holding-heart', color: '#e84393', type: 'expense' },
+    { id: 'e_jiayong', name: '家用', icon: 'fa-basket-shopping', color: '#feca57', type: 'expense' },
+    { id: 'e_shuma', name: '数码', icon: 'fa-laptop', color: '#55a3ff', type: 'expense' },
     { id: 'e_other', name: '其他', icon: 'fa-ellipsis', color: '#636e72', type: 'expense' },
+    { id: 'e_shuidianmei', name: '水电煤', icon: 'fa-bolt', color: '#fdcb6e', type: 'expense' },
+    { id: 'e_jiayou', name: '加油', icon: 'fa-gas-pump', color: '#00cec9', type: 'expense' },
+    { id: 'e_qingke', name: '请客', icon: 'fa-mug-hot', color: '#d63031', type: 'expense' },
+    { id: 'e_xuexi', name: '学习', icon: 'fa-graduation-cap', color: '#6c5ce7', type: 'expense' },
+    { id: 'e_entertain', name: '娱乐', icon: 'fa-gamepad', color: '#a29bfe', type: 'expense' },
+    { id: 'e_comm', name: '通讯', icon: 'fa-phone', color: '#0984e3', type: 'expense' },
+    { id: 'e_laopo', name: '老婆', icon: 'fa-heart', color: '#fd79a8', type: 'expense' },
+    { id: 'e_baoxian', name: '保险', icon: 'fa-shield-heart', color: '#26de81', type: 'expense' },
+    { id: 'e_baobao', name: '宝宝', icon: 'fa-baby', color: '#ff9ff3', type: 'expense' },
+    { id: 'e_fahongbao', name: '发红包', icon: 'fa-gift', color: '#fc5c65', type: 'expense' },
+    { id: 'e_fushi', name: '服饰', icon: 'fa-shirt', color: '#ff7a45', type: 'expense' },
+    { id: 'e_yiyao', name: '医药', icon: 'fa-briefcase-medical', color: '#e17055', type: 'expense' },
+    { id: 'e_housing', name: '住房', icon: 'fa-house', color: '#00b894', type: 'expense' },
+    { id: 'e_meifa', name: '美发', icon: 'fa-scissors', color: '#9b59b6', type: 'expense' },
+    { id: 'e_kuaidi', name: '快递', icon: 'fa-box', color: '#2d98da', type: 'expense' },
+    { id: 'e_zhuangxiu', name: '装修', icon: 'fa-tools', color: '#b33939', type: 'expense' },
+    { id: 'e_shoufu', name: '首付', icon: 'fa-building', color: '#84817a', type: 'expense' },
+    { id: 'e_fangdai', name: '房贷', icon: 'fa-hand-holding-dollar', color: '#ee5253', type: 'expense' },
+    { id: 'e_hunli', name: '婚礼', icon: 'fa-champagne-glasses', color: '#f368e0', type: 'expense' },
 ];
 
 const DEFAULT_INCOME_CATEGORIES = [
-    { id: 'i_salary', name: '工资', icon: 'fa-money-bill-wave', color: '#00b894', type: 'income' },
-    { id: 'i_bonus', name: '奖金', icon: 'fa-gift', color: '#0984e3', type: 'income' },
-    { id: 'i_invest', name: '理财', icon: 'fa-chart-line', color: '#6c5ce7', type: 'income' },
-    { id: 'i_parttime', name: '兼职', icon: 'fa-laptop', color: '#e84393', type: 'income' },
-    { id: 'i_redpacket', name: '红包', icon: 'fa-red-envelope', color: '#d63031', type: 'income' },
+    { id: 'i_ziji', name: '自己', icon: 'fa-user', color: '#00b894', type: 'income' },
+    { id: 'i_xinzi', name: '薪资', icon: 'fa-money-bill-wave', color: '#0984e3', type: 'income' },
     { id: 'i_other', name: '其他', icon: 'fa-ellipsis', color: '#636e72', type: 'income' },
+    { id: 'i_shouhongbao', name: '收红包', icon: 'fa-envelope-open', color: '#d63031', type: 'income' },
+    { id: 'i_cai', name: '采', icon: 'fa-cart-shopping', color: '#feca57', type: 'income' },
+    { id: 'i_taoke', name: '淘客', icon: 'fa-tags', color: '#e84393', type: 'income' },
+    { id: 'i_zhuan', name: '转', icon: 'fa-right-left', color: '#6c5ce7', type: 'income' },
+    { id: 'i_zhuanqian', name: '赚钱', icon: 'fa-coins', color: '#26de81', type: 'income' },
 ];
+
+// 旧默认分类 → 新分类 的迁移映射（v2）
+const CATEGORY_MIGRATION_V2 = {
+    e_food: 'e_food', e_transport: 'e_transport', e_shopping: 'e_fushi', e_grocery: 'e_jiayong',
+    e_entertain: 'e_entertain', e_housing: 'e_housing', e_medical: 'e_yiyao', e_education: 'e_xuexi',
+    e_comm: 'e_comm', e_other: 'e_other',
+    i_salary: 'i_xinzi', i_bonus: 'i_zhuanqian', i_invest: 'i_zhuanqian', i_parttime: 'i_zhuanqian',
+    i_redpacket: 'i_shouhongbao', i_other: 'i_other',
+};
 
 const DEFAULT_PAYMENT_METHODS = ['微信支付', '支付宝', '现金', '银行卡', '信用卡', '其他'];
 
@@ -79,6 +105,7 @@ function saveState() {
         budgets: state.budgets,
         paymentMethods: state.paymentMethods,
         settings: state.settings,
+        categoryVersion: state.categoryVersion || 2,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
@@ -365,6 +392,19 @@ function loadState() {
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
             // 仪表盘页面已移除：旧设置迁移到交易记录
             if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
+
+            // 分类体系 v2 迁移：替换旧默认分类为新的，交易/预算的旧分类ID同步映射
+            if (!data.categoryVersion || data.categoryVersion < 2) {
+                const customCats = state.categories.filter(c => c.id.startsWith('c_'));
+                state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES, ...customCats];
+                state.transactions.forEach(t => {
+                    if (CATEGORY_MIGRATION_V2[t.categoryId]) t.categoryId = CATEGORY_MIGRATION_V2[t.categoryId];
+                });
+                state.budgets.forEach(b => {
+                    if (CATEGORY_MIGRATION_V2[b.categoryId]) b.categoryId = CATEGORY_MIGRATION_V2[b.categoryId];
+                });
+                state.categoryVersion = 2;
+            }
         } catch (e) {
             console.error('Failed to load state:', e);
         }
@@ -1112,7 +1152,10 @@ function renderReportSelectors() {
     ).join('');
 
     // Show/hide month selector based on period
-    if (state.reportPeriod === 'month') {
+    if (state.reportPeriod === 'all') {
+        yearSelect.style.display = 'none';
+        monthSelect.style.display = 'none';
+    } else if (state.reportPeriod === 'month') {
         monthSelect.style.display = '';
         const currentMonth = state.reportMonth || (now.getMonth() + 1);
         monthSelect.innerHTML = Array.from({length: 12}, (_, i) => i + 1).map(m =>
@@ -1127,12 +1170,15 @@ function renderReports() {
     renderReportSelectors();
 
     const isYear = state.reportPeriod === 'year';
+    const isAll = state.reportPeriod === 'all';
     const now = new Date();
     const selYear = state.reportYear || now.getFullYear();
     const selMonth = state.reportMonth || (now.getMonth() + 1);
     let filtered;
 
-    if (isYear) {
+    if (isAll) {
+        filtered = state.transactions.slice();
+    } else if (isYear) {
         filtered = state.transactions.filter(t => new Date(t.date).getFullYear() === selYear);
     } else {
         const mk = `${selYear}-${String(selMonth).padStart(2, '0')}`;
@@ -1145,7 +1191,16 @@ function renderReports() {
 
     // Calculate days for daily average
     let days;
-    if (isYear) {
+    if (isAll) {
+        if (filtered.length === 0) {
+            days = 1;
+        } else {
+            const dates = filtered.map(t => new Date(t.date).getTime()).sort((a, b) => a - b);
+            const first = new Date(dates[0]); first.setHours(0, 0, 0, 0);
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            days = Math.max(1, Math.floor((today - first) / 86400000) + 1);
+        }
+    } else if (isYear) {
         if (selYear === now.getFullYear()) {
             const start = new Date(selYear, 0, 1);
             days = Math.floor((now - start) / 86400000) + 1;
@@ -1166,7 +1221,11 @@ function renderReports() {
     document.getElementById('reportBalance').textContent = formatCurrency(balance);
     document.getElementById('reportDailyAvg').textContent = formatCurrency(dailyAvg);
 
-    if (isYear) {
+    if (isAll) {
+        document.getElementById('dailyChartSubtitle').textContent = '全部年份';
+        document.getElementById('monthlyChartTitle').textContent = '年度收支对比';
+        document.getElementById('monthlyChartSubtitle').textContent = '全部年份';
+    } else if (isYear) {
         document.getElementById('dailyChartSubtitle').textContent = `${selYear}年`;
         document.getElementById('monthlyChartTitle').textContent = '月度收支对比';
         document.getElementById('monthlyChartSubtitle').textContent = `${selYear}年`;
@@ -1177,12 +1236,12 @@ function renderReports() {
         document.getElementById('monthlyChartSubtitle').textContent = getMonthLabel(mk);
     }
 
-    renderMonthlyChart(filtered, isYear, selYear, selMonth);
+    renderMonthlyChart(filtered, isYear, isAll, selYear, selMonth);
     renderCategoryRank(filtered);
-    renderDailyChart(filtered, isYear, selYear, selMonth);
+    renderDailyChart(filtered, isYear, isAll, selYear, selMonth);
 }
 
-function renderMonthlyChart(filtered, isYear, selYear, selMonth) {
+function renderMonthlyChart(filtered, isYear, isAll, selYear, selMonth) {
     const ctx = document.getElementById('monthlyChart');
     if (!ctx) return;
 
@@ -1190,7 +1249,16 @@ function renderMonthlyChart(filtered, isYear, selYear, selMonth) {
     const incomeData = [];
     const expenseData = [];
 
-    if (isYear) {
+    if (isAll) {
+        // All-time report: bars per year
+        const years = [...new Set(filtered.map(t => new Date(t.date).getFullYear()))].sort();
+        for (const y of years) {
+            labels.push(`${y}年`);
+            const txns = filtered.filter(t => new Date(t.date).getFullYear() === y);
+            incomeData.push(txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
+            expenseData.push(txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
+        }
+    } else if (isYear) {
         // Yearly report: bars for Jan ~ Dec of the selected year
         for (let m = 0; m < 12; m++) {
             labels.push(`${m + 1}月`);
@@ -1232,7 +1300,7 @@ function renderMonthlyChart(filtered, isYear, selYear, selMonth) {
                 tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}` } },
             },
             scales: {
-                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: isYear ? 12 : 16 } },
+                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: isAll ? 20 : (isYear ? 12 : 16) } },
                 y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + v } },
             },
         },
@@ -1330,13 +1398,19 @@ function renderCategoryRankChart(entries) {
     });
 }
 
-function renderDailyChart(filtered, isYear, selYear, selMonth) {
+function renderDailyChart(filtered, isYear, isAll, selYear, selMonth) {
     const ctx = document.getElementById('dailyChart');
     if (!ctx) return;
 
     let labels, dailyExpenses;
 
-    if (isYear) {
+    if (isAll) {
+        const years = [...new Set(filtered.map(t => new Date(t.date).getFullYear()))].sort();
+        labels = years.map(y => `${y}年`);
+        dailyExpenses = years.map(y =>
+            filtered.filter(t => t.type === 'expense' && new Date(t.date).getFullYear() === y).reduce((s, t) => s + t.amount, 0)
+        );
+    } else if (isYear) {
         labels = [];
         dailyExpenses = [];
         for (let m = 0; m < 12; m++) {
@@ -1372,7 +1446,7 @@ function renderDailyChart(filtered, isYear, selYear, selMonth) {
                 backgroundColor: 'rgba(255,59,48,0.1)',
                 fill: true,
                 tension: 0.3,
-                pointRadius: isYear ? 4 : 0,
+                pointRadius: (isYear || isAll) ? 4 : 0,
                 pointHoverRadius: 6,
                 borderWidth: 2,
             }],
@@ -1385,7 +1459,7 @@ function renderDailyChart(filtered, isYear, selYear, selMonth) {
                 tooltip: { callbacks: { label: (ctx) => `支出: ${formatCurrency(ctx.raw)}` } },
             },
             scales: {
-                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: isYear ? 12 : 10 } },
+                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: isAll ? 20 : (isYear ? 12 : 10) } },
                 y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + v } },
             },
         },
@@ -2101,7 +2175,7 @@ function loadSampleData() {
         if (m < 2) {
             samples.push({
                 id: uid(), type: 'income', amount: 12000 + Math.floor(Math.random() * 2000),
-                categoryId: 'i_salary', date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-01`,
+                categoryId: 'i_xinzi', date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-01`,
                 note: '月度工资', createdAt: Date.now() - m * 1000000,
             });
         }
@@ -2131,7 +2205,7 @@ function loadSampleData() {
         if (m === 0 && Math.random() > 0.5) {
             samples.push({
                 id: uid(), type: 'income', amount: 500 + Math.floor(Math.random() * 1000),
-                categoryId: 'i_bonus', date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-15`,
+                categoryId: 'i_zhuanqian', date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-15`,
                 note: '项目奖金', createdAt: Date.now() - 500000,
             });
         }
