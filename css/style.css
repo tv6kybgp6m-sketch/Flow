@@ -2642,3 +2642,82 @@ body.cat-dragging {
     #categoryTxnModal .cat-txn-summary { padding: 10px 14px; gap: 14px; }
     #categoryTxnModal .cat-txn-heading h2 { font-size: 15px; }
 }
+
+/* ============================================
+   Mobile width + pie legend (appended last so
+   these win over the earlier media blocks)
+   ============================================ */
+
+/* date has two forms; the compact one is mobile-only */
+.transaction-date .date-short { display: none; }
+/* the doughnut already carries leader-line labels on wide screens */
+.pie-legend { display: none; }
+
+@media (max-width: 640px) {
+    /* reclaim the side whitespace: .view used to add 28px on top of the
+       14px content padding, which squeezed every row on a phone */
+    .main-content {
+        padding-left: 0;
+        padding-right: 0;
+    }
+    .view {
+        padding: 12px 8px;
+    }
+    .transaction-list.full {
+        padding: 4px;
+        border-radius: 12px;
+    }
+    .chart-card, .drill-card {
+        padding: 12px 10px;
+        border-radius: 12px;
+    }
+    .settings-section { padding: 12px 10px; }
+    .budget-item { padding: 10px; }
+
+    /* transaction rows: short date, no vertical wrapping */
+    .transaction-date .date-full { display: none; }
+    .transaction-date .date-short { display: inline; }
+    .transaction-item { gap: 8px; padding: 9px 6px; }
+    .transaction-icon { width: 32px; height: 32px; font-size: 13px; }
+    .transaction-info { min-width: 0; }
+    .transaction-category { font-size: 14px; }
+    .transaction-note { font-size: 11px; }
+    .transaction-date {
+        display: block;
+        font-size: 11px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .transaction-amount { font-size: 14px; }
+
+    /* doughnut keeps its shape, category names move into a legend below */
+    #view-reports .chart-container.tall { height: 230px; }
+    .pie-legend {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px 10px;
+        margin-top: 6px;
+    }
+    .pie-legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 2px;
+        font-size: 11px;
+        color: var(--text-secondary);
+        min-width: 0;
+        cursor: pointer;
+    }
+    .pie-legend-item:active { opacity: 0.6; }
+    .pl-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .pl-name {
+        font-weight: 600;
+        color: var(--text-primary);
+        max-width: 62px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .pl-pct { color: var(--text-secondary); flex-shrink: 0; }
+    .breakdown-item { padding: 10px 2px; }
+}

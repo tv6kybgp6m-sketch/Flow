@@ -441,6 +441,19 @@ function formatDate(dateStr) {
     return `${year}年${month}月${day}日`;
 }
 
+// Short form used on narrow screens where the full date squeezes the row
+function formatDateShort(dateStr) {
+    const d = parseLocalDate(dateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dOnly = new Date(d); dOnly.setHours(0, 0, 0, 0);
+    if (dOnly.getTime() === today.getTime()) return '今天';
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    if (dOnly.getTime() === yesterday.getTime()) return '昨天';
+    if (d.getFullYear() !== today.getFullYear()) return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 function formatDateFull(dateStr) {
     const d = new Date(dateStr);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -693,7 +706,7 @@ function transactionItemHTML(t) {
                 <div class="transaction-category">${name}</div>
                 <div class="transaction-note">${noteText} <span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span></div>
             </div>
-            <div class="transaction-date">${formatDate(t.date)}</div>
+            <div class="transaction-date"><span class="date-full">${formatDate(t.date)}</span><span class="date-short">${formatDateShort(t.date)}</span></div>
             <div class="transaction-amount ${t.type}">${sign}${formatCurrency(t.amount)}</div>
         </div>
     `;
@@ -1453,6 +1466,8 @@ function openBucketLedger(bucketIndex) {
 
 function renderDrillTrend(ctx, txns, range, gran, metric, chartType) {
     if (charts.drill) { charts.drill.destroy(); charts.drill = null; }
+    const legendBox = document.getElementById('pieLegend');
+    if (legendBox) { legendBox.innerHTML = ''; legendBox.classList.add('hidden'); }
     const buckets = buildBuckets(txns, range, gran);
     const values = buckets.map(b => Math.round(bucketTotal(b.txns, metric) * 100) / 100);
     const palette = chartPalette();
@@ -1530,6 +1545,8 @@ const pieLabelPlugin = {
         const total = data.reduce((s, v) => s + Math.abs(v), 0);
         if (!total) return;
         const compact = chart.width < 520;
+        // on phones the category names live in the legend under the chart instead
+        if (compact) return;
 
         ctx.save();
         ctx.font = `500 ${compact ? 10 : 11}px -apple-system, "PingFang SC", sans-serif`;
@@ -1685,6 +1702,40 @@ function renderDrillPie(ctx, txns, metric) {
         },
     });
     charts.drill.$centerText = { label: `${METRIC_META[metric].name}合计`, value: formatCurrency(sums.net) };
+    renderPieLegend(entries, gross, metric);
+}
+
+// Colour-key list under the doughnut: the canvas labels drop to percent-only on
+// narrow screens, so the category names live here instead
+function renderPieLegend(entries, gross, metric) {
+    const box = document.getElementById('pieLegend');
+    if (!box) return;
+    if (!entries || entries.length === 0 || gross <= 0) {
+        box.innerHTML = '';
+        pieLegendEntries = [];
+        box.classList.add('hidden');
+        return;
+    }
+    pieLegendEntries = entries;
+    box.innerHTML = entries.map((e, i) => {
+        const cat = e.id === '__others__' ? null : getCategoryById(e.id);
+        const color = e.id === '__others__' ? PIE_OTHERS_COLOR : (cat?.color || '#8e8e8e');
+        const name = cat?.name || e.name || '未知分类';
+        const pct = ((e.signed / gross) * 100).toFixed(1);
+        return `<div class="pie-legend-item" onclick="openPieLegendEntry(${i})">
+            <span class="pl-dot" style="background:${color}"></span>
+            <span class="pl-name">${name}</span>
+            <span class="pl-pct">${pct}%</span>
+        </div>`;
+    }).join('');
+    box.classList.remove('hidden');
+}
+
+let pieLegendEntries = [];
+
+function openPieLegendEntry(i) {
+    const entry = pieLegendEntries[i];
+    if (entry) openLedgerForEntries(entry);
 }
 
 function renderBreakdownList() {
