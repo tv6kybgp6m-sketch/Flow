@@ -2690,34 +2690,7 @@ body.cat-dragging {
     }
     .transaction-amount { font-size: 14px; }
 
-    /* doughnut keeps its shape, category names move into a legend below */
-    #view-reports .chart-container.tall { height: 230px; }
-    .pie-legend {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2px 10px;
-        margin-top: 6px;
-    }
-    .pie-legend-item {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        padding: 5px 2px;
-        font-size: 11px;
-        color: var(--text-secondary);
-        min-width: 0;
-        cursor: pointer;
-    }
-    .pie-legend-item:active { opacity: 0.6; }
-    .pl-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
-    .pl-name {
-        font-weight: 600;
-        color: var(--text-primary);
-        max-width: 62px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .pl-pct { color: var(--text-secondary); flex-shrink: 0; }
+    /* same structure as the desktop chart: leader-line labels carry the names */
+    #view-reports .chart-container.tall { height: 250px; }
     .breakdown-item { padding: 10px 2px; }
 }

@@ -1658,8 +1658,6 @@ const pieLabelPlugin = {
         const total = data.reduce((s, v) => s + Math.abs(v), 0);
         if (!total) return;
         const compact = chart.width < 520;
-        // on phones the category names live in the legend under the chart instead
-        if (compact) return;
 
         ctx.save();
         ctx.font = `500 ${compact ? 10 : 11}px -apple-system, "PingFang SC", sans-serif`;
@@ -1694,7 +1692,7 @@ const pieLabelPlugin = {
             const useFull = chart.width / 2 - widestFull - 22 >= r * 0.75;
             items.forEach(it => { it.text = useFull ? it.full : it.short; });
             const textW = items.reduce((w, it) => Math.max(w, measure(it.text)), 0);
-            const labelR = Math.min(r + (compact ? 16 : 24), chart.width / 2 - textW - 22);
+            const labelR = Math.min(r + (compact ? 12 : 24), chart.width / 2 - textW - 20);
             if (labelR <= r * 0.7) return;
             const anchorX = cx + sign * (labelR + 10);
             const gap = compact ? 14 : 16;
@@ -1782,9 +1780,11 @@ function renderDrillPie(ctx, txns, metric) {
     const colors = entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (getCategoryById(e.id)?.color || '#8e8e8e'));
     const gross = sums.gross;
 
+    // leave room beside the ring for the leader-line labels on phones
+    const narrow = (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520;
     charts.drill = new Chart(ctx, {
         type: 'doughnut',
-        data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 10 }] },
+        data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 10, radius: narrow ? '78%' : '100%' }]},
         plugins: [pieLabelPlugin, doughnutTotalPlugin],
         options: {
             responsive: true,
