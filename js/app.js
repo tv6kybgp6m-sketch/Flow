@@ -1869,7 +1869,8 @@ function renderBreakdownList() {
     const denominator = metric === 'balance' ? sums.net : sums.gross;
     hint.textContent = metric === 'balance' ? '占比 = 该分类净额 ÷ 净结余' : '点击分类查看每笔流水';
     const top = entries[0].signed || 1;
-    const rows = entries.slice(0, 12).map((e, i) => {
+    // show every category, not just the leading ones
+    const rows = entries.map((e, i) => {
         const cat = getCategoryById(e.id);
         const color = cat?.color || '#8e8e8e';
         const pct = denominator ? ((metric === 'balance' ? e.amount : e.signed) / denominator) * 100 : 0;
@@ -1889,8 +1890,7 @@ function renderBreakdownList() {
                 <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
             </div>`;
     }).join('');
-    const more = entries.length > 12 ? `<div class="breakdown-more">另有 ${entries.length - 12} 个分类未展示</div>` : '';
-    container.innerHTML = rows + more;
+    container.innerHTML = rows;
 }
 
 // ---- Reports: ledger modal (category / trend bucket) ----
