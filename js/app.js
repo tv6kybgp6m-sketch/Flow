@@ -1664,9 +1664,9 @@ const pieLabelPlugin = {
         ctx.textBaseline = 'middle';
 
         const sides = { right: [], left: [] };
+        let drawn = 0;
         arcs.forEach((arc, i) => {
             const pct = (Math.abs(data[i]) / total) * 100;
-            if (pct < 2.5) return; // too thin to label — the breakdown list still shows it
             const mid = (arc.startAngle + arc.endAngle) / 2;
             sides[Math.cos(mid) < 0 ? 'left' : 'right'].push({
                 color: arc.options.backgroundColor,
@@ -1695,14 +1695,15 @@ const pieLabelPlugin = {
             const labelR = Math.min(r + (compact ? 12 : 24), chart.width / 2 - textW - 20);
             if (labelR <= r * 0.7) return;
             const anchorX = cx + sign * (labelR + 10);
-            const gap = compact ? 14 : 16;
-            // spread the column evenly around the circle centre, then de-collide downwards
+            // every slice gets a label, so the column is evenly spaced and the gap
+            // shrinks to whatever the canvas height allows before lines are drawn
             const n = items.length;
-            items.forEach((it, i) => { it.y = cy + (i - (n - 1) / 2) * gap; });
-            items.sort((a, b) => a.y - b.y);
-            for (let i = 1; i < n; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + gap);
-            const overflow = items[n - 1].y - (chart.height - 10);
-            if (overflow > 0) items.forEach(it => { it.y -= overflow; });
+            const gap = Math.max(10, Math.min(compact ? 14 : 16, (chart.height - 16) / n));
+            const span = (n - 1) * gap;
+            let startY = Math.max(8, Math.min(cy - span / 2, chart.height - 8 - span));
+            items.sort((a, b) => a.y - b.y); // follow slice order top-to-bottom to avoid crossing lines
+            items.forEach((it, i) => { it.y = startY + i * gap; });
+            drawn += n;
             items.forEach(it => {
                 const y = it.y;
                 ctx.strokeStyle = it.color;
@@ -1724,6 +1725,7 @@ const pieLabelPlugin = {
                 ctx.fillText(it.text, textX, y);
             });
         });
+        chart.$pieLabelCount = drawn;
         ctx.restore();
     },
 };
