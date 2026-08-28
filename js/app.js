@@ -84,6 +84,8 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [] },  // soft-delete markers
+    pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     reportMetric: 'expense',
     reportChartType: 'line',
     reportGranularity: null,
@@ -109,11 +111,98 @@ function saveState() {
         paymentMethods: state.paymentMethods,
         settings: state.settings,
         categoryVersion: state.categoryVersion || 2,
+        deleted: state.deleted,
+        pmAddedAt: state.pmAddedAt,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
     // Trigger iCloud sync (debounced)
     scheduleICloudSync();
+}
+
+// ---- Soft delete (tombstones) ----
+// Deleting a record keeps a marker behind so the removal can travel to other
+// devices: a plain union merge could only ever add rows, never remove them.
+const TOMBSTONE_TTL_DAYS = 30;
+
+function normalizeTombstones(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const clean = list => Array.isArray(list)
+        ? list.filter(x => x && x.id && x.deletedAt).map(x => ({ id: String(x.id), deletedAt: Number(x.deletedAt) }))
+        : [];
+    return {
+        transactions: clean(src.transactions),
+        categories: clean(src.categories),
+        budgets: clean(src.budgets),
+        paymentMethods: clean(src.paymentMethods),
+    };
+}
+
+function normalizeAddedAtMap(raw) {
+    const out = {};
+    if (raw && typeof raw === 'object') {
+        Object.keys(raw).forEach(k => {
+            const v = Number(raw[k]);
+            if (k && v > 0) out[k] = v;
+        });
+    }
+    return out;
+}
+
+function addTombstone(kind, id) {
+    const list = state.deleted[kind];
+    const existing = list.find(x => x.id === id);
+    if (existing) existing.deletedAt = Date.now();
+    else list.push({ id, deletedAt: Date.now() });
+}
+
+// Drop markers older than the retention window so the lists cannot grow forever.
+function pruneTombstones() {
+    const cutoff = Date.now() - TOMBSTONE_TTL_DAYS * 86400000;
+    Object.keys(state.deleted).forEach(k => {
+        state.deleted[k] = state.deleted[k].filter(x => x.deletedAt > cutoff);
+    });
+}
+
+// Hide any live row a newer marker covers. A row edited after the deletion wins
+// (last write wins), which is what lets an intentional re-add resurrect a record.
+function applyTombstones() {
+    const drop = (list, marks) => {
+        if (!marks.length) return list;
+        const byId = new Map(marks.map(m => [m.id, m.deletedAt]));
+        return list.filter(item => {
+            const at = byId.get(item.id);
+            if (at === undefined) return true;
+            return (item.updatedAt || item.createdAt || 0) > at;
+        });
+    };
+    state.transactions = drop(state.transactions, state.deleted.transactions);
+    state.categories = drop(state.categories, state.deleted.categories);
+    state.budgets = drop(state.budgets, state.deleted.budgets);
+
+    // Payment methods are plain strings with no per-row timestamp, so "when was
+    // this added" lives in pmAddedAt. Unknown age counts as 0, i.e. a deletion
+    // always wins unless the method was demonstrably re-added afterwards.
+    const pmMarks = new Map(state.deleted.paymentMethods.map(m => [m.id, m.deletedAt]));
+    if (pmMarks.size) {
+        const kept = state.paymentMethods.filter(name => {
+            const at = pmMarks.get(name);
+            if (at === undefined) return true;
+            return (state.pmAddedAt[name] || 0) > at;
+        });
+        // never leave the user without a payment method
+        if (kept.length > 0) state.paymentMethods = kept;
+    }
+}
+
+function mergeTombstoneList(local, remote) {
+    const map = new Map((local || []).map(m => [m.id, m]));
+    (remote || []).forEach(m => {
+        if (!m || !m.id || !m.deletedAt) return;
+        const cur = map.get(m.id);
+        if (!cur || m.deletedAt > cur.deletedAt) map.set(m.id, m);
+    });
+    return Array.from(map.values());
 }
 
 // ---- iCloud Sync ----
@@ -183,6 +272,8 @@ async function syncToICloud() {
                 budgets: state.budgets,
                 paymentMethods: state.paymentMethods,
                 settings: state.settings,
+                deleted: state.deleted,
+                pmAddedAt: state.pmAddedAt,
             },
         };
         await window.electronAPI.icloud.writeData(syncData);
@@ -233,14 +324,29 @@ function mergeRemoteData(remoteData) {
     state.budgets.forEach(b => budMap.set(b.categoryId, b));
     (remote.budgets || []).forEach(b => budMap.set(b.categoryId, b));
 
-    // Merge payment methods: union by name
+    // Merge payment methods: union by name, remember when each was added
     const pmSet = new Set(state.paymentMethods);
     (remote.paymentMethods || []).forEach(p => pmSet.add(p));
     state.paymentMethods = Array.from(pmSet);
+    const remoteAddedAt = normalizeAddedAtMap(remoteData.data.pmAddedAt);
+    Object.keys(remoteAddedAt).forEach(k => {
+        if (!state.pmAddedAt[k] || remoteAddedAt[k] > state.pmAddedAt[k]) state.pmAddedAt[k] = remoteAddedAt[k];
+    });
+
+    // Merge the soft-delete markers, then let them hide any row they cover
+    const remoteDeleted = normalizeTombstones(remoteData.data.deleted);
+    state.deleted = {
+        transactions: mergeTombstoneList(state.deleted.transactions, remoteDeleted.transactions),
+        categories: mergeTombstoneList(state.deleted.categories, remoteDeleted.categories),
+        budgets: mergeTombstoneList(state.deleted.budgets, remoteDeleted.budgets),
+        paymentMethods: mergeTombstoneList(state.deleted.paymentMethods, remoteDeleted.paymentMethods),
+    };
 
     state.transactions = Array.from(txnMap.values());
     state.categories = Array.from(catMap.values());
     state.budgets = Array.from(budMap.values());
+    pruneTombstones();
+    applyTombstones();
 
     // Settings: prefer remote if newer
     if (remoteData.lastModified > (iCloudLastSyncTime || 0)) {
@@ -265,6 +371,8 @@ function exportToICloud() {
             budgets: state.budgets,
             paymentMethods: state.paymentMethods,
             settings: state.settings,
+            deleted: state.deleted,
+            pmAddedAt: state.pmAddedAt,
         },
     };
     const blob = new Blob([JSON.stringify(syncData, null, 2)], { type: 'application/json' });
@@ -393,6 +501,8 @@ function loadState() {
                 ? data.paymentMethods
                 : [...DEFAULT_PAYMENT_METHODS];
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
+            state.deleted = normalizeTombstones(data.deleted);
+            state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
             // 仪表盘页面已移除：旧设置迁移到交易记录
             if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
 
@@ -1018,6 +1128,7 @@ function addPaymentMethod() {
     if (!name) { showToast('请输入支付方式名称', 'error'); return; }
     if (state.paymentMethods.includes(name)) { showToast('该支付方式已存在', 'error'); return; }
     state.paymentMethods.push(name);
+    state.pmAddedAt[name] = Date.now();
     saveState();
     input.value = '';
     renderPaymentMethodsManage();
@@ -1034,6 +1145,7 @@ function deletePaymentMethod(name) {
         showToast(`该支付方式有 ${count} 笔交易记录，无法删除`, 'error');
         return;
     }
+    addTombstone('paymentMethods', name);
     state.paymentMethods = state.paymentMethods.filter(p => p !== name);
     if ((state.settings.defaultPaymentMethod || '微信支付') === name) {
         state.settings.defaultPaymentMethod = state.paymentMethods[0];
@@ -1138,6 +1250,7 @@ function editTransaction(id) {
 }
 
 function deleteTransaction(id) {
+    addTombstone('transactions', id);
     state.transactions = state.transactions.filter(t => t.id !== id);
     saveState();
     showToast('交易已删除', 'success');
@@ -1974,6 +2087,7 @@ function saveBudget() {
 }
 
 function deleteBudget(id) {
+    addTombstone('budgets', id);
     state.budgets = state.budgets.filter(b => b.id !== id);
     saveState();
     renderBudget();
@@ -2140,6 +2254,8 @@ function deleteCategory(id) {
         return;
     }
     if (!confirm(`确定删除分类「${cat.name}」吗？`)) return;
+    addTombstone('categories', id);
+    state.budgets.filter(b => b.categoryId === id).forEach(b => addTombstone('budgets', b.id));
     state.categories = state.categories.filter(c => c.id !== id);
     state.budgets = state.budgets.filter(b => b.categoryId !== id);
     saveState();
@@ -2544,6 +2660,7 @@ function importData(event) {
                     const pm = (row['支付方式'] || '').trim();
                     if (pm && !state.paymentMethods.includes(pm)) {
                         state.paymentMethods.push(pm);
+                        state.pmAddedAt[pm] = Date.now();
                     }
                 });
             }
@@ -2645,6 +2762,8 @@ function clearAllData() {
     state.transactions = [];
     state.budgets = [];
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
+    state.deleted = normalizeTombstones(null);
+    state.pmAddedAt = {};
     saveState();
     renderView(state.currentView);
     showToast('所有数据已清空', 'success');
@@ -2815,6 +2934,8 @@ function initEventListeners() {
 // ---- Init ----
 function init() {
     loadState();
+    pruneTombstones();
+    applyTombstones();
     document.documentElement.setAttribute('data-theme', state.settings.theme);
     initEventListeners();
     initCategoryInteractions();
