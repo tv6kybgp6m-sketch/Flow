@@ -1755,8 +1755,9 @@ const doughnutTotalPlugin = {
     },
 };
 
-// A doughnut with 20+ slivers is unreadable — keep the top slices and merge the tail
-const PIE_MAX_SLICES = 10;
+// Keep the top slices and merge the tail; 25 leaves room for a long tail of
+// small categories while the adaptive label column still fits the canvas.
+const PIE_MAX_SLICES = 25;
 const PIE_OTHERS_COLOR = '#b2b2b7';
 
 function topPieEntries(entries) {
