@@ -50,6 +50,10 @@
                         <i class="fa-solid fa-chart-pie"></i>
                         <span>报表分析</span>
                     </a>
+                    <a class="nav-item" data-view="balance">
+                        <i class="fa-solid fa-scale-balanced"></i>
+                        <span>资产负债</span>
+                    </a>
                     <a class="nav-item" data-view="budget">
                         <i class="fa-solid fa-wallet"></i>
                         <span>预算管理</span>
@@ -215,6 +219,94 @@
                     </div>
                 </section>
 
+                <!-- Balance Sheet View -->
+                <section class="view" id="view-balance">
+                    <div class="view-header">
+                        <h1>资产负债</h1>
+                        <div class="report-controls">
+                            <div class="report-period">
+                                <button class="period-btn active" data-bal-period="month">月报</button>
+                                <button class="period-btn" data-bal-period="year">年报</button>
+                                <button class="period-btn" data-bal-period="all">总</button>
+                            </div>
+                            <div class="report-period-picker" id="balanceYearWrap">
+                                <select class="filter-select" id="balanceYearSelect"></select>
+                            </div>
+                            <div class="report-period-picker" id="balanceMonthWrap">
+                                <select class="filter-select" id="balanceMonthSelect"></select>
+                            </div>
+                            <button class="secondary-btn" onclick="openAccountsModal()">
+                                <i class="fa-solid fa-building-columns"></i> 账户
+                            </button>
+                            <button class="primary-btn" onclick="openBalanceModal()">
+                                <i class="fa-solid fa-plus"></i> 记余额
+                            </button>
+                        </div>
+                    </div>
+                    <div class="report-summary">
+                        <div class="report-card clickable" data-bal-metric="asset" id="cardAsset">
+                            <div class="report-card-top">
+                                <span class="report-label">总资产</span>
+                                <i class="fa-solid fa-chevron-down report-card-hint"></i>
+                            </div>
+                            <span class="report-value income" id="balTotalAsset">¥0.00</span>
+                        </div>
+                        <div class="report-card clickable" data-bal-metric="liability" id="cardLiability">
+                            <div class="report-card-top">
+                                <span class="report-label">总负债</span>
+                                <i class="fa-solid fa-chevron-down report-card-hint"></i>
+                            </div>
+                            <span class="report-value expense" id="balTotalLiability">¥0.00</span>
+                        </div>
+                        <div class="report-card clickable" data-bal-metric="net" id="cardNet">
+                            <div class="report-card-top">
+                                <span class="report-label">净资产</span>
+                                <i class="fa-solid fa-chevron-down report-card-hint"></i>
+                            </div>
+                            <span class="report-value" id="balNetWorth">¥0.00</span>
+                        </div>
+                        <div class="report-card">
+                            <div class="report-card-top">
+                                <span class="report-label">负债率</span>
+                            </div>
+                            <span class="report-value" id="balRatio">0.0%</span>
+                            <div class="bal-asof" id="balAsOf"></div>
+                        </div>
+                    </div>
+                    <div class="chart-card drill-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3 id="balChartTitle">净资产走势</h3>
+                                <span class="chart-subtitle" id="balChartSubtitle"></span>
+                            </div>
+                            <div class="drill-controls">
+                                <div class="drill-toggle" id="balGranularity">
+                                    <button class="gran-btn" data-bal-gran="month">按月</button>
+                                    <button class="gran-btn" data-bal-gran="year">按年</button>
+                                </div>
+                                <div class="drill-toggle chart-type-toggle">
+                                    <button class="type-ico-btn" data-bal-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
+                                    <button class="type-ico-btn" data-bal-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
+                                    <button class="type-ico-btn" data-bal-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chart-container tall">
+                            <canvas id="balanceChart"></canvas>
+                        </div>
+                        <div class="drill-chart-empty hidden" id="balanceChartEmpty"></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3 id="balBreakdownTitle">账户明细</h3>
+                                <span class="chart-subtitle" id="balBreakdownHint">点击账户查看历史余额</span>
+                            </div>
+                        </div>
+                        <div class="breakdown-list" id="balBreakdownList"></div>
+                    </div>
+                </section>
+
                 <!-- Budget View -->
                 <section class="view" id="view-budget">
                     <div class="view-header">
@@ -305,6 +397,7 @@
                                 <select class="settings-select" id="defaultViewSelect" onchange="setDefaultView(this.value)">
                                     <option value="transactions">交易记录</option>
                                     <option value="reports">报表分析</option>
+                                    <option value="balance">资产负债</option>
                                     <option value="budget">预算管理</option>
                                 </select>
                             </div>
@@ -360,7 +453,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.6.12</div>
+                                    <div class="about-version">版本 1.7.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -554,11 +647,91 @@
             </div>
         </div>
 
-        <!-- Mobile floating add button (outside the scrolling view so its position
-             is never affected by the window's overflow / height clipping) -->
+        <!-- Mobile floating add buttons (outside the scrolling view so their position
+             is never affected by the window's overflow / height clipping).
+             Only one is visible at a time, driven by .mac-window.show-balance-fab -->
         <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
             <i class="fa-solid fa-plus"></i>
         </button>
+        <button class="fab-add fab-balance" onclick="openBalanceModal()" title="记余额">
+            <i class="fa-solid fa-plus"></i>
+        </button>
+
+        <!-- Balance Entry Modal -->
+        <div class="modal-overlay hidden" id="balanceModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>记录账户余额</h2>
+                        <div class="cat-txn-sub" id="balanceModalSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeBalanceModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>归属月份</label>
+                        <input type="month" class="text-input" id="balanceMonthInput">
+                    </div>
+                    <div class="bal-entry-actions">
+                        <button class="secondary-btn" onclick="copyLastMonthBalances()"><i class="fa-solid fa-copy"></i> 沿用上期</button>
+                        <button class="secondary-btn" onclick="clearBalanceInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
+                    </div>
+                    <div id="balanceEntryList" class="balance-entry-list"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn" onclick="closeBalanceModal()">取消</button>
+                    <button class="primary-btn" onclick="saveBalances()"><i class="fa-solid fa-check"></i> 保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Account Management Modal -->
+        <div class="modal-overlay hidden" id="accountsModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>账户管理</h2>
+                        <div class="cat-txn-sub">资产与负债账户，点击可重命名</div>
+                    </div>
+                    <button class="modal-close" onclick="closeAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="account-new">
+                        <input type="text" class="text-input" id="newAccountName" placeholder="新账户名称">
+                        <select class="text-input" id="newAccountKind">
+                            <option value="asset">资产</option>
+                            <option value="liability">负债</option>
+                        </select>
+                        <select class="text-input" id="newAccountGroup"></select>
+                        <button class="primary-btn" onclick="addAccount()"><i class="fa-solid fa-plus"></i> 添加</button>
+                    </div>
+                    <div id="accountManageList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Account History Modal -->
+        <div class="modal-overlay hidden" id="accountHistoryModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="cat-txn-heading">
+                        <div class="cat-txn-icon" id="acctHistIcon"></div>
+                        <div class="cat-txn-heading-text">
+                            <h2 id="acctHistTitle">账户历史</h2>
+                            <div class="cat-txn-sub" id="acctHistSub"></div>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <button class="modal-icon-btn" id="acctHistDelete" title="删除账户"><i class="fa-solid fa-trash"></i></button>
+                        <button class="modal-close" onclick="closeAccountHistoryModal()"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                </div>
+                <div class="cat-txn-summary" id="acctHistSummary"></div>
+                <div class="modal-body cat-txn-body">
+                    <div id="acctHistList"></div>
+                </div>
+            </div>
+        </div>
 
         <!-- Toast -->
         <div class="toast-container" id="toastContainer"></div>
@@ -571,7 +744,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.6.12').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.7.0').catch(() => {});
             });
         }
     </script>

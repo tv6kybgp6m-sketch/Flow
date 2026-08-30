@@ -51,6 +51,32 @@ const CATEGORY_MIGRATION_V2 = {
     i_redpacket: 'i_shouhongbao', i_other: 'i_other',
 };
 
+// 资产负债：预设账户（kind 决定计入资产还是负债，group 用于分组统计）
+const DEFAULT_ACCOUNTS = [
+    { id: 'a_cash',       name: '现金',      kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759' },
+    { id: 'a_debit',      name: '储蓄卡',    kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#5ac8fa' },
+    { id: 'a_fixed',      name: '定期存款',  kind: 'asset',     group: '储蓄存款', icon: 'fa-vault',                color: '#007aff' },
+    { id: 'a_mmf',        name: '货币基金',  kind: 'asset',     group: '投资理财', icon: 'fa-coins',                color: '#ffcc00' },
+    { id: 'a_stock',      name: '股票基金',  kind: 'asset',     group: '投资理财', icon: 'fa-arrow-trend-up',       color: '#ff9500' },
+    { id: 'a_wealth',     name: '理财产品',  kind: 'asset',     group: '投资理财', icon: 'fa-certificate',          color: '#af52de' },
+    { id: 'a_fund',       name: '公积金',    kind: 'asset',     group: '其他资产', icon: 'fa-house-chimney',        color: '#30b0c7' },
+    { id: 'a_house',      name: '房产',      kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e' },
+    { id: 'a_car',        name: '车辆',      kind: 'asset',     group: '固定资产', icon: 'fa-car-side',             color: '#636e72' },
+    { id: 'a_receivable', name: '应收借款',  kind: 'asset',     group: '其他资产', icon: 'fa-hand-holding-dollar',  color: '#ff2d55' },
+    { id: 'l_credit',     name: '信用卡',    kind: 'liability', group: '消费负债', icon: 'fa-credit-card',          color: '#ff3b30' },
+    { id: 'l_install',    name: '花呗/白条', kind: 'liability', group: '消费负债', icon: 'fa-mobile-screen-button', color: '#ff9500' },
+    { id: 'l_mortgage',   name: '房贷',      kind: 'liability', group: '大额负债', icon: 'fa-house-circle-check',   color: '#5856d6' },
+    { id: 'l_carloan',    name: '车贷',      kind: 'liability', group: '大额负债', icon: 'fa-car-burst',            color: '#f7475a' },
+    { id: 'l_personal',   name: '私人借款',  kind: 'liability', group: '其他负债', icon: 'fa-handshake',            color: '#8e8e93' },
+    { id: 'l_other',      name: '其他负债',  kind: 'liability', group: '其他负债', icon: 'fa-ellipsis',             color: '#aeaeb2' },
+];
+
+const ASSET_GROUPS = ['流动资金', '储蓄存款', '投资理财', '固定资产', '其他资产'];
+const LIABILITY_GROUPS = ['消费负债', '大额负债', '其他负债'];
+const ACCOUNT_ICON_CHOICES = ['fa-wallet', 'fa-building-columns', 'fa-vault', 'fa-coins', 'fa-arrow-trend-up',
+    'fa-certificate', 'fa-house', 'fa-car-side', 'fa-hand-holding-dollar', 'fa-credit-card',
+    'fa-mobile-screen-button', 'fa-handshake', 'fa-gem', 'fa-landmark', 'fa-briefcase', 'fa-ellipsis'];
+
 const DEFAULT_PAYMENT_METHODS = ['微信支付', '支付宝', '现金', '银行卡', '信用卡', '其他'];
 
 const ICON_OPTIONS = [
@@ -76,6 +102,14 @@ let state = {
     categories: [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES],
     budgets: [],
     paymentMethods: [...DEFAULT_PAYMENT_METHODS],
+    accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
+    balances: [],
+    balancePeriod: 'month',
+    balanceYear: null,
+    balanceMonth: null,
+    balanceMetric: 'asset',
+    balanceChartType: 'line',
+    balanceGran: null,
     settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false },
     currentView: 'transactions',
     transactionFilter: 'all',
@@ -84,7 +118,7 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     reportMetric: 'expense',
     reportChartType: 'line',
@@ -109,6 +143,8 @@ function saveState() {
         categories: state.categories,
         budgets: state.budgets,
         paymentMethods: state.paymentMethods,
+        accounts: state.accounts,
+        balances: state.balances,
         settings: state.settings,
         categoryVersion: state.categoryVersion || 2,
         deleted: state.deleted,
@@ -135,6 +171,8 @@ function normalizeTombstones(raw) {
         categories: clean(src.categories),
         budgets: clean(src.budgets),
         paymentMethods: clean(src.paymentMethods),
+        accounts: clean(src.accounts),
+        balances: clean(src.balances),
     };
 }
 
@@ -168,7 +206,8 @@ function pruneTombstones() {
 // (last write wins), which is what lets an intentional re-add resurrect a record.
 function applyTombstones() {
     const drop = (list, marks) => {
-        if (!marks.length) return list;
+        if (!Array.isArray(list)) return list || [];
+        if (!marks || !marks.length) return list;
         const byId = new Map(marks.map(m => [m.id, m.deletedAt]));
         return list.filter(item => {
             const at = byId.get(item.id);
@@ -179,6 +218,8 @@ function applyTombstones() {
     state.transactions = drop(state.transactions, state.deleted.transactions);
     state.categories = drop(state.categories, state.deleted.categories);
     state.budgets = drop(state.budgets, state.deleted.budgets);
+    state.accounts = drop(state.accounts, state.deleted.accounts);
+    state.balances = drop(state.balances, state.deleted.balances);
 
     // Payment methods are plain strings with no per-row timestamp, so "when was
     // this added" lives in pmAddedAt. Unknown age counts as 0, i.e. a deletion
@@ -271,6 +312,8 @@ async function syncToICloud() {
                 categories: state.categories,
                 budgets: state.budgets,
                 paymentMethods: state.paymentMethods,
+                accounts: state.accounts,
+                balances: state.balances,
                 settings: state.settings,
                 deleted: state.deleted,
                 pmAddedAt: state.pmAddedAt,
@@ -324,6 +367,22 @@ function mergeRemoteData(remoteData) {
     state.budgets.forEach(b => budMap.set(b.categoryId, b));
     (remote.budgets || []).forEach(b => budMap.set(b.categoryId, b));
 
+    // Merge accounts: union by ID, newer definition wins
+    const accMap = new Map();
+    state.accounts.forEach(a => accMap.set(a.id, a));
+    (remote.accounts || []).forEach(a => {
+        const cur = accMap.get(a.id);
+        if (!cur || (a.updatedAt || 0) > (cur.updatedAt || 0)) accMap.set(a.id, a);
+    });
+
+    // Merge balance snapshots: id is accountId + month, so re-recording a month updates in place
+    const balMap = new Map();
+    state.balances.forEach(b => balMap.set(b.id, b));
+    (remote.balances || []).forEach(b => {
+        const cur = balMap.get(b.id);
+        if (!cur || (b.updatedAt || 0) > (cur.updatedAt || 0)) balMap.set(b.id, b);
+    });
+
     // Merge payment methods: union by name, remember when each was added
     const pmSet = new Set(state.paymentMethods);
     (remote.paymentMethods || []).forEach(p => pmSet.add(p));
@@ -340,11 +399,15 @@ function mergeRemoteData(remoteData) {
         categories: mergeTombstoneList(state.deleted.categories, remoteDeleted.categories),
         budgets: mergeTombstoneList(state.deleted.budgets, remoteDeleted.budgets),
         paymentMethods: mergeTombstoneList(state.deleted.paymentMethods, remoteDeleted.paymentMethods),
+        accounts: mergeTombstoneList(state.deleted.accounts, remoteDeleted.accounts),
+        balances: mergeTombstoneList(state.deleted.balances, remoteDeleted.balances),
     };
 
     state.transactions = Array.from(txnMap.values());
     state.categories = Array.from(catMap.values());
     state.budgets = Array.from(budMap.values());
+    state.accounts = Array.from(accMap.values());
+    state.balances = Array.from(balMap.values());
     pruneTombstones();
     applyTombstones();
 
@@ -370,6 +433,8 @@ function exportToICloud() {
             categories: state.categories,
             budgets: state.budgets,
             paymentMethods: state.paymentMethods,
+            accounts: state.accounts,
+            balances: state.balances,
             settings: state.settings,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
@@ -500,6 +565,10 @@ function loadState() {
             state.paymentMethods = (data.paymentMethods && data.paymentMethods.length > 0)
                 ? data.paymentMethods
                 : [...DEFAULT_PAYMENT_METHODS];
+            state.accounts = Array.isArray(data.accounts) && data.accounts.length > 0
+                ? data.accounts
+                : DEFAULT_ACCOUNTS.map(a => ({ ...a }));
+            state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
@@ -620,6 +689,8 @@ function showToast(message, type = 'success') {
 // ---- Navigation ----
 function switchView(viewName) {
     state.currentView = viewName;
+    const win = document.querySelector('.mac-window');
+    if (win) win.classList.toggle('show-balance-fab', viewName === 'balance');
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.view === viewName);
     });
@@ -637,6 +708,7 @@ function renderView(viewName) {
         case 'transactions': renderTransactions(); break;
         case 'reports': renderReports(); break;
         case 'budget': renderBudget(); break;
+        case 'balance': renderBalance(); break;
         case 'categories': renderCategories(); break;
         case 'settings': renderSettings(); break;
     }
@@ -1469,13 +1541,14 @@ function categoryTotals(txns, metric) {
 }
 
 function updateReportToggleStates() {
-    document.querySelectorAll('.report-card.clickable').forEach(card => {
+    // 资产负债页复用了同样的类名，这里必须限定在 #view-reports 内
+    document.querySelectorAll('#view-reports .report-card.clickable').forEach(card => {
         card.classList.toggle('active', card.dataset.metric === state.reportMetric);
     });
-    document.querySelectorAll('.chart-type-toggle .type-ico-btn').forEach(btn => {
+    document.querySelectorAll('#view-reports .chart-type-toggle .type-ico-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.chart === state.reportChartType);
     });
-    document.querySelectorAll('.gran-btn').forEach(btn => {
+    document.querySelectorAll('#view-reports .gran-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.gran === activeGranularity());
     });
     const granWrap = document.getElementById('drillGranularity');
@@ -1483,7 +1556,7 @@ function updateReportToggleStates() {
 }
 
 function setReportMetric(metric) {
-    if (state.reportMetric === metric) return;
+    if (!METRIC_META[metric] || state.reportMetric === metric) return;
     state.reportMetric = metric;
     renderDrillChart();
 }
@@ -1988,13 +2061,13 @@ function refreshCategoryLedger() {
 }
 
 function initReportDrillListeners() {
-    document.querySelectorAll('.report-card.clickable').forEach(card => {
+    document.querySelectorAll('#view-reports .report-card.clickable').forEach(card => {
         card.addEventListener('click', () => setReportMetric(card.dataset.metric));
     });
-    document.querySelectorAll('.chart-type-toggle .type-ico-btn').forEach(btn => {
+    document.querySelectorAll('#view-reports .chart-type-toggle .type-ico-btn').forEach(btn => {
         btn.addEventListener('click', () => setReportChartType(btn.dataset.chart));
     });
-    document.querySelectorAll('.gran-btn').forEach(btn => {
+    document.querySelectorAll('#view-reports .gran-btn').forEach(btn => {
         btn.addEventListener('click', () => setReportGranularity(btn.dataset.gran));
     });
 }
@@ -2748,6 +2821,37 @@ function loadSampleData() {
         }
     }
 
+    // 资产负债示例：最近 6 个月，每月给主要账户记一次余额
+    const balSeed = {
+        a_debit:    [18200, 19650, 21300, 20450, 23800, 25600],
+        a_cash:     [1200, 980, 1500, 1100, 1350, 1600],
+        a_fixed:    [80000, 80000, 90000, 90000, 90000, 100000],
+        a_mmf:      [12500, 13200, 12800, 14100, 15600, 16200],
+        a_stock:    [45800, 42300, 47600, 51200, 48900, 55400],
+        a_wealth:   [50000, 50000, 60000, 60000, 60000, 60000],
+        a_fund:     [36800, 37600, 38400, 39200, 40100, 41000],
+        a_house:    [2850000, 2850000, 2850000, 2850000, 2850000, 2850000],
+        a_car:      [180000, 176000, 172000, 168000, 164000, 160000],
+        l_credit:   [4200, 6800, 3100, 5400, 2900, 7300],
+        l_install:  [880, 1450, 620, 2100, 980, 1650],
+        l_mortgage: [1620000, 1611000, 1602000, 1593000, 1584000, 1575000],
+    };
+    const balMonths = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        balMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    state.balances = [];
+    Object.entries(balSeed).forEach(([accountId, series]) => {
+        if (!state.accounts.some(a => a.id === accountId)) return;
+        balMonths.forEach((month, idx) => {
+            state.balances.push({
+                id: `${accountId}_${month}`, accountId, month, amount: series[idx],
+                createdAt: Date.now(), updatedAt: Date.now(),
+            });
+        });
+    });
+
     state.transactions = samples;
     state.budgets = [
         { id: uid(), categoryId: 'e_food', amount: 2000 },
@@ -2764,12 +2868,698 @@ function clearAllData() {
     if (!confirm('确定要清空所有数据吗？此操作不可恢复。')) return;
     state.transactions = [];
     state.budgets = [];
+    state.balances = [];
+    state.accounts = DEFAULT_ACCOUNTS.map(a => ({ ...a }));
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
     state.deleted = normalizeTombstones(null);
     state.pmAddedAt = {};
     saveState();
     renderView(state.currentView);
     showToast('所有数据已清空', 'success');
+}
+
+// ==================== 资产负债 ====================
+const BAL_METRICS = {
+    asset:     { name: '资产', color: '#34c759', light: 'rgba(52, 199, 89, 0.14)' },
+    liability: { name: '负债', color: '#ff3b30', light: 'rgba(255, 59, 48, 0.14)' },
+    net:       { name: '净资产', color: '#007aff', light: 'rgba(0, 122, 255, 0.14)' },
+};
+let balanceRenderToken = 0;
+
+function accountById(id) { return state.accounts.find(a => a.id === id); }
+function balanceMonths() { return [...new Set(state.balances.map(b => b.month))].sort(); }
+function balanceYears() { return [...new Set(balanceMonths().map(m => m.slice(0, 4)))].sort(); }
+
+// 每个账户「截至该月（含）」最近一次的余额，缺月自动沿用自己的上期数
+function carriedBalances(month) {
+    const map = {};
+    state.accounts.forEach(a => {
+        const hist = state.balances
+            .filter(b => b.accountId === a.id && b.month <= month)
+            .sort((x, y) => x.month.localeCompare(y.month));
+        if (hist.length) map[a.id] = hist[hist.length - 1].amount;
+    });
+    return map;
+}
+
+function totalsFromMap(map) {
+    let asset = 0, liability = 0;
+    state.accounts.forEach(a => {
+        const v = map[a.id];
+        if (v === undefined || v === null) return;
+        if (a.kind === 'asset') asset += v; else liability += v;
+    });
+    return { asset, liability, net: asset - liability, ratio: asset > 0 ? liability / asset : 0 };
+}
+
+// 解析当前期间：返回要展示的余额月份
+function balancePeriodInfo() {
+    const now = new Date();
+    const months = balanceMonths();
+    const years = balanceYears();
+    const period = state.balancePeriod;
+    const selYear = state.balanceYear || now.getFullYear();
+    const selMonth = state.balanceMonth || (now.getMonth() + 1);
+
+    if (period === 'all') {
+        const month = months[months.length - 1] || null;
+        return { period, title: '最新一期', month, exact: !!month };
+    }
+    if (period === 'year') {
+        const month = months.filter(m => m.slice(0, 4) === String(selYear)).pop() || null;
+        return { period, title: `${selYear}年`, month, exact: !!month };
+    }
+    const key = `${selYear}-${String(selMonth).padStart(2, '0')}`;
+    const month = months.filter(m => m <= key).pop() || null;
+    return { period, title: `${selYear}年${selMonth}月`, month, exact: month === key, selYear, selMonth };
+}
+
+function renderBalanceSelectors() {
+    const yearWrap = document.getElementById('balanceYearWrap');
+    const monthWrap = document.getElementById('balanceMonthWrap');
+    const yearSelect = document.getElementById('balanceYearSelect');
+    const monthSelect = document.getElementById('balanceMonthSelect');
+    const now = new Date();
+
+    const years = balanceYears().map(Number);
+    years.push(now.getFullYear());
+    const uniq = [...new Set(years)].sort((a, b) => b - a);
+    let cur = state.balanceYear || now.getFullYear();
+    if (!uniq.includes(cur)) cur = uniq[0];
+    state.balanceYear = cur;
+    yearSelect.innerHTML = uniq.map(y => `<option value="${y}" ${y === cur ? 'selected' : ''}>${y}年</option>`).join('');
+
+    yearWrap.classList.toggle('hidden', state.balancePeriod === 'all');
+    monthWrap.classList.toggle('hidden', state.balancePeriod !== 'month');
+    if (state.balancePeriod === 'month') {
+        const cm = state.balanceMonth || (now.getMonth() + 1);
+        monthSelect.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1)
+            .map(m => `<option value="${m}" ${m === cm ? 'selected' : ''}>${m}月</option>`).join('');
+    }
+}
+
+function updateBalanceToggleStates() {
+    document.querySelectorAll('#view-balance .report-card.clickable').forEach(card => {
+        card.classList.toggle('active', card.dataset.balMetric === state.balanceMetric);
+    });
+    document.querySelectorAll('#view-balance [data-bal-chart]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.balChart === state.balanceChartType);
+    });
+    document.querySelectorAll('#view-balance [data-bal-gran]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.balGran === balanceActiveGran());
+    });
+    const gran = document.getElementById('balGranularity');
+    if (gran) gran.classList.toggle('hidden', state.balanceChartType === 'pie');
+}
+
+function balanceActiveGran() {
+    return state.balanceGran || (state.balancePeriod === 'year' ? 'month' : 'month');
+}
+
+function setBalanceMetric(metric) {
+    if (state.balanceMetric === metric) return;
+    state.balanceMetric = metric;
+    renderBalanceChart();
+    renderBalanceBreakdown();
+}
+
+function setBalanceChartType(type) {
+    if (state.balanceChartType === type) return;
+    state.balanceChartType = type;
+    renderBalanceChart();
+}
+
+function setBalanceGran(gran) {
+    if (state.balanceGran === gran) return;
+    state.balanceGran = gran;
+    renderBalanceChart();
+}
+
+function balanceShowEmpty(message) {
+    const empty = document.getElementById('balanceChartEmpty');
+    empty.textContent = message;
+    empty.classList.remove('hidden');
+    document.getElementById('balanceChart').parentElement.classList.add('hidden');
+    if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
+    updateBalanceToggleStates();
+}
+
+function balanceHideEmpty() {
+    document.getElementById('balanceChartEmpty').classList.add('hidden');
+    document.getElementById('balanceChart').parentElement.classList.remove('hidden');
+}
+
+function renderBalance() {
+    renderBalanceSelectors();
+
+    const info = balancePeriodInfo();
+    const map = info.month ? carriedBalances(info.month) : {};
+    const t = totalsFromMap(map);
+
+    document.getElementById('balTotalAsset').textContent = formatCurrency(t.asset);
+    document.getElementById('balTotalLiability').textContent = formatCurrency(t.liability);
+    document.getElementById('balNetWorth').textContent = formatCurrency(t.net);
+    document.getElementById('balRatio').textContent = (t.ratio * 100).toFixed(1) + '%';
+    const asOf = document.getElementById('balAsOf');
+    asOf.textContent = info.month
+        ? (info.exact ? `截至 ${info.month.replace('-', '年')}月` : `沿用 ${info.month.replace('-', '年')}月余额`)
+        : '尚无记录';
+
+    renderBalanceChart();
+    renderBalanceBreakdown();
+}
+
+function balanceTrendMonths() {
+    const all = balanceMonths();
+    if (!all.length) return [];
+    const info = balancePeriodInfo();
+    if (balanceActiveGran() === 'year') {
+        return balanceYears().map(y => ({ key: `${y}-12`, label: `${y}年` }));
+    }
+    if (state.balancePeriod === 'year') {
+        const y = String(state.balanceYear || new Date().getFullYear());
+        return Array.from({ length: 12 }, (_, i) => {
+            const m = `${y}-${String(i + 1).padStart(2, '0')}`;
+            return { key: m, label: `${i + 1}月` };
+        });
+    }
+    const end = info.month || all[all.length - 1];
+    return all.filter(m => m <= end).map(m => {
+        const [y, mm] = m.split('-');
+        return { key: m, label: `${y.slice(2)}年${Number(mm)}月` };
+    });
+}
+
+function renderBalanceChart() {
+    const info = balancePeriodInfo();
+    const metric = state.balanceMetric;
+    const meta = BAL_METRICS[metric];
+    const chartType = state.balanceChartType;
+
+    document.getElementById('balChartTitle').textContent =
+        chartType === 'pie' ? `${meta.name}构成占比` : `${meta.name}走势`;
+    const subtitle = document.getElementById('balChartSubtitle');
+    const parts = [info.month ? `截至 ${info.month.replace('-', '年')}月` : '尚无数据'];
+    if (chartType !== 'pie') parts.push(balanceActiveGran() === 'year' ? '按年' : '按月');
+    parts.push('点击图表可查看该期明细');
+    subtitle.textContent = parts.join(' · ');
+
+    updateBalanceToggleStates();
+
+    if (!info.month) {
+        balanceShowEmpty('还没有记录过余额，点右上角「记余额」建立第一期');
+        return;
+    }
+    balanceHideEmpty();
+
+    const token = ++balanceRenderToken;
+    requestAnimationFrame(() => {
+        if (token !== balanceRenderToken) return;
+        const ctx = document.getElementById('balanceChart');
+        if (!ctx) return;
+        if (chartType === 'pie') renderBalancePie(ctx, info);
+        else renderBalanceTrend(ctx, chartType, meta, metric);
+    });
+}
+
+function balanceSeriesValue(map, metric) {
+    const t = totalsFromMap(map);
+    return metric === 'asset' ? t.asset : (metric === 'liability' ? t.liability : t.net);
+}
+
+function renderBalanceTrend(ctx, chartType, meta, metric) {
+    if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
+    const buckets = balanceTrendMonths();
+    const values = buckets.map(b => Math.round(balanceSeriesValue(carriedBalances(b.key), metric) * 100) / 100);
+    const palette = chartPalette();
+    const accent = chartType === 'bar'
+        ? values.map(v => (metric === 'net' && v < 0) ? '#ff3b30' : meta.color)
+        : meta.color;
+
+    charts.balance = new Chart(ctx, {
+        type: chartType,
+        data: {
+            labels: buckets.map(b => b.label),
+            datasets: [{
+                label: meta.name,
+                data: values,
+                borderColor: meta.color,
+                backgroundColor: chartType === 'line' ? meta.light : accent,
+                borderWidth: chartType === 'line' ? 2 : 0,
+                fill: chartType === 'line',
+                tension: 0.3,
+                pointRadius: buckets.length > 24 ? 0 : 3,
+                pointHoverRadius: 6,
+                pointBackgroundColor: meta.color,
+                borderRadius: 5,
+                maxBarThickness: 40,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (evt, elements) => {
+                if (!elements || !elements.length) return;
+                const b = balanceTrendMonths()[elements[0].index];
+                if (b) openAccountHistoryForPeriod(b.key, b.label);
+            },
+            onHover: (evt, elements) => {
+                const target = evt.native && evt.native.target;
+                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (c) => `${meta.name}: ${formatCurrency(c.raw)}` } },
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: palette.text, font: { size: 10, family: '-apple-system' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+                },
+                y: {
+                    grid: { color: palette.grid },
+                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => state.settings.currency + (Math.abs(v) >= 10000 ? (v / 10000).toFixed(0) + '万' : v) },
+                },
+            },
+        },
+    });
+}
+
+// 构成：资产/负债按账户，净资产按各账户净贡献
+function balancePieEntries(info, metric) {
+    const map = carriedBalances(info.month);
+    const rows = [];
+    state.accounts.forEach(a => {
+        const v = map[a.id];
+        if (v === undefined || v === null || v === 0) return;
+        if (metric === 'asset' && a.kind !== 'asset') return;
+        if (metric === 'liability' && a.kind !== 'liability') return;
+        const amount = metric === 'net' ? (a.kind === 'asset' ? v : -v) : v;
+        rows.push({ id: a.id, amount, signed: Math.abs(amount) });
+    });
+    rows.sort((x, y) => y.signed - x.signed);
+    return rows;
+}
+
+function renderBalancePie(ctx, info) {
+    if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
+    const metric = state.balanceMetric;
+    const entries = topPieEntries(balancePieEntries(info, metric));
+    const gross = entries.reduce((s, e) => s + e.signed, 0);
+    const net = entries.reduce((s, e) => s + e.amount, 0);
+    if (!entries.length || gross <= 0) {
+        balanceShowEmpty(`该期没有可统计的${BAL_METRICS[metric].name}数据`);
+        return;
+    }
+    balanceHideEmpty();
+    const labels = entries.map(e => e.name || accountById(e.id)?.name || '未知');
+    const colors = entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (accountById(e.id)?.color || '#8e8e8e'));
+
+    charts.balance = new Chart(ctx, {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: entries.map(e => e.signed), backgroundColor: colors, borderWidth: 0, hoverOffset: 10, radius: (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520 ? '68%' : '100%' }] },
+        plugins: [pieLabelPlugin, doughnutTotalPlugin],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '52%',
+            layout: { padding: { left: 28, right: 28, top: 10, bottom: 10 } },
+            onClick: (evt, elements) => {
+                if (!elements || !elements.length) return;
+                const e = entries[elements[0].index];
+                if (e) openAccountHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.name);
+            },
+            onHover: (evt, elements) => {
+                const target = evt.native && evt.native.target;
+                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (c) => {
+                            const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
+                            return `${c.label}: ${formatCurrency(c.raw)} (${pct}%)`;
+                        },
+                    },
+                },
+            },
+        },
+    });
+    charts.balance.$centerText = { label: `${BAL_METRICS[metric].name}合计`, value: formatCurrency(net) };
+}
+
+function renderBalanceBreakdown() {
+    const container = document.getElementById('balBreakdownList');
+    if (!container) return;
+    const info = balancePeriodInfo();
+    const metric = state.balanceMetric;
+    document.getElementById('balBreakdownTitle').textContent = `${BAL_METRICS[metric].name}账户明细`;
+
+    if (!info.month) {
+        container.innerHTML = '<div class="breakdown-empty">还没有记录过余额</div>';
+        return;
+    }
+    const entries = balancePieEntries(info, metric);
+    const total = entries.reduce((s, e) => s + e.signed, 0);
+    if (!entries.length) {
+        container.innerHTML = `<div class="breakdown-empty">该期没有${BAL_METRICS[metric].name}数据</div>`;
+        return;
+    }
+    const top = entries[0].signed || 1;
+    container.innerHTML = entries.map((e, i) => {
+        const a = accountById(e.id);
+        const color = a?.color || '#8e8e8e';
+        const pct = total ? (e.signed / total) * 100 : 0;
+        const sign = metric === 'net' && e.amount < 0 ? '-' : '';
+        return `
+            <div class="breakdown-item" onclick="openAccountHistoryForAccount('${e.id}')">
+                <div class="breakdown-icon" style="background:${color}22;color:${color}">
+                    <i class="fa-solid ${a?.icon || 'fa-ellipsis'}"></i>
+                </div>
+                <div class="breakdown-main">
+                    <div class="breakdown-head">
+                        <span class="breakdown-name">${a?.name || '未知账户'}<span class="breakdown-rank">${i + 1}</span></span>
+                        <span class="breakdown-amount">${sign}${formatCurrency(Math.abs(e.amount))}<em>${pct.toFixed(1)}%</em></span>
+                    </div>
+                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (e.signed / top) * 100)}%;background:${color}"></div></div>
+                </div>
+                <span class="bal-group-tag">${a?.group || ''}</span>
+                <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
+            </div>`;
+    }).join('');
+}
+
+// ---------------- 账户历史弹窗 ----------------
+let historyAccountId = null;
+
+function openAccountHistoryForAccount(accountId, fallbackName) {
+    if (!accountId) { openAccountHistoryForPeriod(balancePeriodInfo().month, '其余账户'); return; }
+    historyAccountId = accountId;
+    const a = accountById(accountId);
+    const iconEl = document.getElementById('acctHistIcon');
+    const color = a?.color || 'var(--accent)';
+    iconEl.style.background = a ? `${color}22` : 'var(--accent-light)';
+    iconEl.style.color = color;
+    iconEl.innerHTML = `<i class="fa-solid ${a?.icon || 'fa-building-columns'}"></i>`;
+    document.getElementById('acctHistTitle').textContent = a?.name || fallbackName || '账户历史';
+    document.getElementById('acctHistSub').textContent = a
+        ? `${a.kind === 'asset' ? '资产' : '负债'} · ${a.group}` : '';
+    const del = document.getElementById('acctHistDelete');
+    del.style.display = a ? 'flex' : 'none';
+    del.onclick = () => deleteAccountFromHistory(accountId);
+    renderAccountHistory();
+    document.getElementById('accountHistoryModal').classList.remove('hidden');
+}
+
+function openAccountHistoryForPeriod(month, label) {
+    if (!month) return;
+    historyAccountId = null;
+    const map = carriedBalances(month);
+    const t = totalsFromMap(map);
+    const iconEl = document.getElementById('acctHistIcon');
+    iconEl.style.background = 'var(--accent-light)';
+    iconEl.style.color = 'var(--accent)';
+    iconEl.innerHTML = '<i class="fa-solid fa-calendar-day"></i>';
+    document.getElementById('acctHistTitle').textContent = label || month;
+    document.getElementById('acctHistSub').textContent = `${month.replace('-', '年')}月余额`;
+    const del = document.getElementById('acctHistDelete');
+    del.style.display = 'none';
+    const rows = state.accounts.filter(a => map[a.id] !== undefined).sort((x, y) => map[y.id] - map[x.id]);
+    document.getElementById('acctHistSummary').innerHTML = `
+        <span class="cat-txn-summary-item income">资产 <b>${formatCurrency(t.asset)}</b></span>
+        <span class="cat-txn-summary-item expense">负债 <b>${formatCurrency(t.liability)}</b></span>
+        <span class="cat-txn-summary-item">净资产 <b>${formatCurrency(t.net)}</b></span>`;
+    document.getElementById('acctHistList').innerHTML = rows.length
+        ? rows.map(a => `
+            <div class="breakdown-item" onclick="closeAccountHistoryModal();openAccountHistoryForAccount('${a.id}')">
+                <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
+                <div class="breakdown-main">
+                    <div class="breakdown-head">
+                        <span class="breakdown-name">${a.name}</span>
+                        <span class="breakdown-amount">${a.kind === 'liability' ? '-' : ''}${formatCurrency(map[a.id])}</span>
+                    </div>
+                </div>
+                <span class="bal-group-tag">${a.group}</span>
+            </div>`).join('')
+        : '<div class="breakdown-empty">该期没有余额记录</div>';
+    document.getElementById('accountHistoryModal').classList.remove('hidden');
+}
+
+function renderAccountHistory() {
+    const a = accountById(historyAccountId);
+    if (!a) return;
+    const hist = state.balances.filter(b => b.accountId === historyAccountId).sort((x, y) => y.month.localeCompare(x.month));
+    const latest = hist[0];
+    const prev = hist[1];
+    const delta = latest && prev ? latest.amount - prev.amount : 0;
+    document.getElementById('acctHistSummary').innerHTML = `
+        <span class="cat-txn-summary-item">共 <b>${hist.length}</b> 期</span>
+        <span class="cat-txn-summary-item">最新 <b>${latest ? formatCurrency(latest.amount) : '—'}</b></span>
+        ${prev ? `<span class="cat-txn-summary-item ${delta >= 0 ? 'income' : 'expense'}">环比 <b>${delta >= 0 ? '+' : ''}${formatCurrency(delta)}</b></span>` : ''}`;
+    document.getElementById('acctHistList').innerHTML = hist.length
+        ? hist.map(b => `
+            <div class="bal-history-row">
+                <span class="bh-month">${b.month.replace('-', '年')}月</span>
+                <span class="bh-amount">${formatCurrency(b.amount)}</span>
+                <button class="bh-delete" onclick="deleteBalanceSnapshot('${b.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
+            </div>`).join('')
+        : '<div class="breakdown-empty">该账户还没有记录过余额</div>';
+}
+
+function deleteBalanceSnapshot(id) {
+    if (!confirm('删除这一期的余额记录？')) return;
+    addTombstone('balances', id);
+    state.balances = state.balances.filter(b => b.id !== id);
+    saveState();
+    renderAccountHistory();
+    renderBalance();
+    showToast('已删除该期余额', 'success');
+}
+
+function deleteAccountFromHistory(accountId) {
+    const a = accountById(accountId);
+    if (!a) return;
+    if (!confirm(`确定删除账户「${a.name}」吗？其余额记录也会一并删除。`)) return;
+    removeAccount(accountId);
+    closeAccountHistoryModal();
+    showToast('账户已删除', 'success');
+}
+
+function removeAccount(accountId) {
+    addTombstone('accounts', accountId);
+    state.balances.filter(b => b.accountId === accountId).forEach(b => addTombstone('balances', b.id));
+    state.accounts = state.accounts.filter(a => a.id !== accountId);
+    state.balances = state.balances.filter(b => b.accountId !== accountId);
+    saveState();
+    renderView(state.currentView);
+    refreshAccountLists();
+}
+
+function closeAccountHistoryModal() {
+    document.getElementById('accountHistoryModal').classList.add('hidden');
+    historyAccountId = null;
+}
+
+// ---------------- 记余额弹窗 ----------------
+function openBalanceModal(month) {
+    const info = balancePeriodInfo();
+    const input = document.getElementById('balanceMonthInput');
+    input.value = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    renderBalanceEntry();
+    document.getElementById('balanceModal').classList.remove('hidden');
+}
+
+function closeBalanceModal() {
+    document.getElementById('balanceModal').classList.add('hidden');
+}
+
+function renderBalanceEntry() {
+    const month = document.getElementById('balanceMonthInput').value;
+    document.getElementById('balanceModalSub').textContent = month ? `填写各账户在 ${month.replace('-', '年')}月底的余额` : '请先选择月份';
+    const existing = {};
+    state.balances.filter(b => b.month === month).forEach(b => { existing[b.accountId] = b.amount; });
+    const list = document.getElementById('balanceEntryList');
+    if (!state.accounts.length) {
+        list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
+        return;
+    }
+    list.innerHTML = state.accounts.map(a => `
+        <div class="bal-entry-row">
+            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
+            <div class="be-name">${a.name}<span class="be-kind ${a.kind}">${a.kind === 'asset' ? '资产' : '负债'}</span></div>
+            <div class="be-input">
+                <span class="currency-symbol">${state.settings.currency}</span>
+                <input type="number" step="0.01" min="0" class="text-input be-field" data-account="${a.id}"
+                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
+            </div>
+        </div>`).join('');
+}
+
+function previousMonthOf(month) {
+    if (!month) return null;
+    const [y, m] = month.split('-').map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+function copyLastMonthBalances() {
+    const month = document.getElementById('balanceMonthInput').value;
+    const prev = previousMonthOf(month);
+    if (!prev) { showToast('没有更早的记录可沿用', 'error'); return; }
+    const src = carriedBalances(prev);
+    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => {
+        const v = src[inp.dataset.account];
+        if (v !== undefined && !inp.value) inp.value = v;
+    });
+    showToast(`已沿用 ${prev.replace('-', '年')}月的余额`, 'success');
+}
+
+function clearBalanceInputs() {
+    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => { inp.value = ''; });
+}
+
+function saveBalances() {
+    const month = document.getElementById('balanceMonthInput').value;
+    if (!month) { showToast('请选择月份', 'error'); return; }
+    let saved = 0;
+    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => {
+        const raw = inp.value.trim();
+        if (raw === '') return;
+        const amount = parseFloat(raw);
+        if (!isFinite(amount) || amount < 0) return;
+        const accountId = inp.dataset.account;
+        const id = `${accountId}_${month}`;
+        const existing = state.balances.find(b => b.id === id);
+        if (existing) {
+            existing.amount = amount;
+            existing.updatedAt = Date.now();
+        } else {
+            state.balances.push({ id, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+        }
+        saved += 1;
+    });
+    if (!saved) { showToast('没有需要保存的金额', 'error'); return; }
+    saveState();
+    closeBalanceModal();
+    state.balancePeriod = 'month';
+    const [y, m] = month.split('-').map(Number);
+    state.balanceYear = y;
+    state.balanceMonth = m;
+    document.querySelectorAll('[data-bal-period]').forEach(b => b.classList.toggle('active', b.dataset.balPeriod === 'month'));
+    renderBalance();
+    showToast(`已保存 ${saved} 个账户的余额`, 'success');
+}
+
+// ---------------- 账户管理弹窗 ----------------
+function openAccountsModal() {
+    const sel = document.getElementById('newAccountGroup');
+    sel.innerHTML = (kind => (kind === 'asset' ? ASSET_GROUPS : LIABILITY_GROUPS).map(g => `<option>${g}</option>`).join(''))(document.getElementById('newAccountKind').value);
+    renderAccountManageList();
+    document.getElementById('accountsModal').classList.remove('hidden');
+}
+
+function closeAccountsModal() { document.getElementById('accountsModal').classList.add('hidden'); }
+
+function renderAccountManageList() {
+    const box = document.getElementById('accountManageList');
+    if (!box) return;
+    const sections = [
+        ['asset', '资产账户'],
+        ['liability', '负债账户'],
+    ];
+    box.innerHTML = sections.map(([kind, label]) => {
+        const rows = state.accounts.filter(a => a.kind === kind);
+        return `
+            <div class="account-section-title">${label}（${rows.length}）</div>
+            ${rows.map(a => `
+                <div class="account-row">
+                    <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
+                    <div class="ar-name" onclick="renameAccount('${a.id}')">${a.name}<span class="be-kind ${a.kind}">${a.group}</span></div>
+                    <button class="bh-delete" onclick="deleteAccountFromList('${a.id}')" title="删除"><i class="fa-solid fa-trash"></i></button>
+                </div>`).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
+    }).join('');
+}
+
+function addAccount() {
+    const name = document.getElementById('newAccountName').value.trim();
+    const kind = document.getElementById('newAccountKind').value;
+    const group = document.getElementById('newAccountGroup').value;
+    if (!name) { showToast('请输入账户名称', 'error'); return; }
+    if (state.accounts.some(a => a.name === name)) { showToast('已有同名账户', 'error'); return; }
+    const palette = ['#007aff', '#34c759', '#ff9500', '#af52de', '#5ac8fa', '#ff3b30', '#a2845e', '#30b0c7'];
+    state.accounts.push({
+        id: 'acc_' + uid(),
+        name, kind, group,
+        icon: kind === 'asset' ? 'fa-wallet' : 'fa-credit-card',
+        color: palette[state.accounts.length % palette.length],
+        createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    document.getElementById('newAccountName').value = '';
+    saveState();
+    renderAccountManageList();
+    refreshAccountLists();
+    showToast('账户已添加', 'success');
+}
+
+function renameAccount(id) {
+    const a = accountById(id);
+    if (!a) return;
+    const name = prompt('账户名称', a.name);
+    if (!name || !name.trim() || name.trim() === a.name) return;
+    a.name = name.trim();
+    a.updatedAt = Date.now();
+    saveState();
+    renderAccountManageList();
+    renderBalance();
+    showToast('已重命名', 'success');
+}
+
+function deleteAccountFromList(id) {
+    const a = accountById(id);
+    if (!a) return;
+    const count = state.balances.filter(b => b.accountId === id).length;
+    if (!confirm(`确定删除「${a.name}」吗？${count ? `它的 ${count} 期余额记录也会一并删除。` : ''}`)) return;
+    removeAccount(id);
+    showToast('账户已删除', 'success');
+}
+
+function refreshAccountLists() {
+    if (state.currentView === 'balance') renderBalance();
+}
+
+function initBalanceListeners() {
+    document.querySelectorAll('[data-bal-period]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.balancePeriod = btn.dataset.balPeriod;
+            state.balanceGran = null;
+            document.querySelectorAll('[data-bal-period]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderBalance();
+        });
+    });
+    document.querySelectorAll('#view-balance [data-bal-chart]').forEach(btn => {
+        btn.addEventListener('click', () => setBalanceChartType(btn.dataset.balChart));
+    });
+    document.querySelectorAll('#view-balance [data-bal-gran]').forEach(btn => {
+        btn.addEventListener('click', () => setBalanceGran(btn.dataset.balGran));
+    });
+    document.querySelectorAll('#view-balance .report-card.clickable').forEach(card => {
+        card.addEventListener('click', () => setBalanceMetric(card.dataset.balMetric));
+    });
+    document.getElementById('balanceYearSelect').addEventListener('change', e => {
+        state.balanceYear = parseInt(e.target.value);
+        renderBalance();
+    });
+    document.getElementById('balanceMonthSelect').addEventListener('change', e => {
+        state.balanceMonth = parseInt(e.target.value);
+        renderBalance();
+    });
+    document.getElementById('balanceMonthInput').addEventListener('change', renderBalanceEntry);
+    document.getElementById('newAccountKind').addEventListener('change', () => {
+        const kind = document.getElementById('newAccountKind').value;
+        document.getElementById('newAccountGroup').innerHTML =
+            (kind === 'asset' ? ASSET_GROUPS : LIABILITY_GROUPS).map(g => `<option>${g}</option>`).join('');
+    });
 }
 
 // ---- Event Listeners ----
@@ -2841,6 +3631,9 @@ function initEventListeners() {
 
     // Report drill-down (metric cards / chart type / granularity)
     initReportDrillListeners();
+
+    // Balance sheet view
+    initBalanceListeners();
 
     // Report year/month selectors
     document.getElementById('reportYearSelect').addEventListener('change', (e) => {

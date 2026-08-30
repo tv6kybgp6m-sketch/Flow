@@ -2694,3 +2694,145 @@ body.cat-dragging {
     #view-reports .chart-container.tall { height: 250px; }
     .breakdown-item { padding: 10px 2px; }
 }
+
+/* ============================================
+   资产负债 (balance sheet)
+   ============================================ */
+.bal-asof { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+.bal-group-tag {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    background: var(--bg-content);
+    border-radius: 4px;
+    padding: 2px 6px;
+    flex-shrink: 0;
+}
+
+/* 记余额弹窗 */
+.balance-modal .modal-body { max-height: 66vh; }
+.bal-entry-actions {
+    display: flex;
+    gap: 8px;
+    margin: 4px 0 10px;
+}
+.bal-entry-actions .secondary-btn { font-size: 12px; padding: 6px 10px; }
+.balance-entry-list { display: flex; flex-direction: column; gap: 2px; }
+.bal-entry-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 0.5px solid var(--divider);
+}
+.bal-entry-row:last-child { border-bottom: none; }
+.be-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.be-kind {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--bg-content);
+    color: var(--text-tertiary);
+}
+.be-kind.asset { color: var(--income); background: var(--income-light); }
+.be-kind.liability { color: var(--expense); background: var(--expense-light); }
+.be-input {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 132px;
+    flex-shrink: 0;
+}
+.be-input .currency-symbol {
+    position: absolute;
+    left: 8px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    pointer-events: none;
+}
+.be-field { padding: 7px 8px 7px 22px; font-size: 14px; width: 100%; }
+
+/* 账户管理 */
+.account-new {
+    display: grid;
+    grid-template-columns: 1fr 84px 108px auto;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+.account-new .text-input { padding: 8px 10px; font-size: 13px; }
+.account-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 12px 2px 6px;
+    border-bottom: 0.5px solid var(--divider);
+}
+.account-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 2px;
+    border-bottom: 0.5px solid var(--divider);
+}
+.ar-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+.ar-name:hover { color: var(--accent); }
+
+/* 账户历史 */
+.bal-history-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 4px;
+    border-bottom: 0.5px solid var(--divider);
+    font-size: 13px;
+}
+.bh-month { color: var(--text-secondary); flex: 1; }
+.bh-amount { font-weight: 600; color: var(--text-primary); }
+.bh-delete {
+    border: none;
+    background: var(--bg-card-hover);
+    color: var(--text-tertiary);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+.bh-delete:hover { background: var(--expense); color: #fff; }
+
+/* 悬浮按钮：每个页面只留一个 */
+.fab-balance { display: none; }
+
+@media (max-width: 640px) {
+    .mac-window:not(.show-balance-fab) .fab-balance { display: none; }
+    .mac-window.show-balance-fab .fab-add:not(.fab-balance) { display: none; }
+    .mac-window.show-balance-fab .fab-balance { display: flex; }
+    .view-header .secondary-btn { font-size: 12px; padding: 6px 10px; }
+    .account-new { grid-template-columns: 1fr 1fr; }
+    .account-new .primary-btn { grid-column: span 2; justify-content: center; }
+    .be-input { width: 116px; }
+    .bal-group-tag { display: none; }
+    #view-balance .breakdown-amount { font-size: 12px; }
+    .balance-modal .modal-body { max-height: calc(100dvh - 150px - env(safe-area-inset-top, 0px)); }
+}
