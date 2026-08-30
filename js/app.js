@@ -1741,12 +1741,13 @@ const pieLabelPlugin = {
         arcs.forEach((arc, i) => {
             const pct = (Math.abs(data[i]) / total) * 100;
             const mid = (arc.startAngle + arc.endAngle) / 2;
+            const pctText = pct < 0.1 ? '不足0.1%' : `${pct.toFixed(1)}%`;
             sides[Math.cos(mid) < 0 ? 'left' : 'right'].push({
                 color: arc.options.backgroundColor,
                 mid,
                 y: cy + Math.sin(mid) * r,
-                full: `${chart.data.labels[i]} ${pct.toFixed(1)}%`,
-                short: `${pct.toFixed(0)}%`,
+                full: `${chart.data.labels[i]} ${pctText}`,
+                short: pctText,
                 text: '',
             });
         });
@@ -2890,7 +2891,19 @@ function accountById(id) { return state.accounts.find(a => a.id === id); }
 function balanceMonths() { return [...new Set(state.balances.map(b => b.month))].sort(); }
 function balanceYears() { return [...new Set(balanceMonths().map(m => m.slice(0, 4)))].sort(); }
 
-// 每个账户「截至该月（含）」最近一次的余额，缺月自动沿用自己的上期数
+// 只取「这个月本身」记过的账户。余额是快照不是流水，缺月不能拿上期顶替
+function balancesAtMonth(month) {
+    const map = {};
+    if (!month) return map;
+    state.balances.filter(b => b.month === month).forEach(b => { map[b.accountId] = b.amount; });
+    return map;
+}
+
+function monthHasRecords(month) {
+    return !!month && state.balances.some(b => b.month === month);
+}
+
+// 仅用于「沿用上期」按钮的预填，属于用户主动操作，不参与统计
 function carriedBalances(month) {
     const map = {};
     state.accounts.forEach(a => {
@@ -2930,8 +2943,7 @@ function balancePeriodInfo() {
         return { period, title: `${selYear}年`, month, exact: !!month };
     }
     const key = `${selYear}-${String(selMonth).padStart(2, '0')}`;
-    const month = months.filter(m => m <= key).pop() || null;
-    return { period, title: `${selYear}年${selMonth}月`, month, exact: month === key, selYear, selMonth };
+    return { period, title: `${selYear}年${selMonth}月`, month: key, exact: months.includes(key), selYear, selMonth };
 }
 
 function renderBalanceSelectors() {
@@ -3013,7 +3025,8 @@ function renderBalance() {
     renderBalanceSelectors();
 
     const info = balancePeriodInfo();
-    const map = info.month ? carriedBalances(info.month) : {};
+    const recorded = monthHasRecords(info.month);
+    const map = recorded ? balancesAtMonth(info.month) : {};
     const t = totalsFromMap(map);
 
     document.getElementById('balTotalAsset').textContent = formatCurrency(t.asset);
@@ -3021,9 +3034,9 @@ function renderBalance() {
     document.getElementById('balNetWorth').textContent = formatCurrency(t.net);
     document.getElementById('balRatio').textContent = (t.ratio * 100).toFixed(1) + '%';
     const asOf = document.getElementById('balAsOf');
-    asOf.textContent = info.month
-        ? (info.exact ? `截至 ${info.month.replace('-', '年')}月` : `沿用 ${info.month.replace('-', '年')}月余额`)
-        : '尚无记录';
+    asOf.textContent = !info.month
+        ? '尚无记录'
+        : (recorded ? `截至 ${info.month.replace('-', '年')}月` : '该期未记录');
 
     renderBalanceChart();
     renderBalanceBreakdown();
@@ -3034,7 +3047,11 @@ function balanceTrendMonths() {
     if (!all.length) return [];
     const info = balancePeriodInfo();
     if (balanceActiveGran() === 'year') {
-        return balanceYears().map(y => ({ key: `${y}-12`, label: `${y}年` }));
+        // 按年 = 该年最后一个有记录的月份，即年末值
+        return balanceYears().map(y => ({
+            key: all.filter(m => m.slice(0, 4) === y).pop(),
+            label: `${y}年`,
+        }));
     }
     if (state.balancePeriod === 'year') {
         const y = String(state.balanceYear || new Date().getFullYear());
@@ -3059,7 +3076,8 @@ function renderBalanceChart() {
     document.getElementById('balChartTitle').textContent =
         chartType === 'pie' ? `${meta.name}构成占比` : `${meta.name}走势`;
     const subtitle = document.getElementById('balChartSubtitle');
-    const parts = [info.month ? `截至 ${info.month.replace('-', '年')}月` : '尚无数据'];
+    const parts = [!info.month ? '尚无数据'
+        : (monthHasRecords(info.month) ? `${info.month.replace('-', '年')}月记录` : `${info.month.replace('-', '年')}月未记录`)];
     if (chartType !== 'pie') parts.push(balanceActiveGran() === 'year' ? '按年' : '按月');
     parts.push('点击图表可查看该期明细');
     subtitle.textContent = parts.join(' · ');
@@ -3087,10 +3105,17 @@ function balanceSeriesValue(map, metric) {
     return metric === 'asset' ? t.asset : (metric === 'liability' ? t.liability : t.net);
 }
 
+// 某个月的净资产/总资产/总负债；该月没记录就返回 null（图表上留空，不走平线）
+function balanceValueAt(month, metric) {
+    if (!monthHasRecords(month)) return null;
+    const v = balanceSeriesValue(balancesAtMonth(month), metric);
+    return Math.round(v * 100) / 100;
+}
+
 function renderBalanceTrend(ctx, chartType, meta, metric) {
     if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
     const buckets = balanceTrendMonths();
-    const values = buckets.map(b => Math.round(balanceSeriesValue(carriedBalances(b.key), metric) * 100) / 100);
+    const values = buckets.map(b => balanceValueAt(b.key, metric));
     const palette = chartPalette();
     const accent = chartType === 'bar'
         ? values.map(v => (metric === 'net' && v < 0) ? '#ff3b30' : meta.color)
@@ -3107,6 +3132,7 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
                 backgroundColor: chartType === 'line' ? meta.light : accent,
                 borderWidth: chartType === 'line' ? 2 : 0,
                 fill: chartType === 'line',
+                spanGaps: true,
                 tension: 0.3,
                 pointRadius: buckets.length > 24 ? 0 : 3,
                 pointHoverRadius: 6,
@@ -3147,7 +3173,7 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
 
 // 构成：资产/负债按账户，净资产按各账户净贡献
 function balancePieEntries(info, metric) {
-    const map = carriedBalances(info.month);
+    const map = balancesAtMonth(info.month);
     const rows = [];
     state.accounts.forEach(a => {
         const v = map[a.id];
@@ -3214,37 +3240,46 @@ function renderBalanceBreakdown() {
     if (!container) return;
     const info = balancePeriodInfo();
     const metric = state.balanceMetric;
-    document.getElementById('balBreakdownTitle').textContent = `${BAL_METRICS[metric].name}账户明细`;
+    const meta = BAL_METRICS[metric];
+    document.getElementById('balBreakdownTitle').textContent = `${meta.name}账户明细`;
 
-    if (!info.month) {
-        container.innerHTML = '<div class="breakdown-empty">还没有记录过余额</div>';
+    // 列出该维度下的全部账户；当月没记过的显示「—」，不补数也不累加
+    const accounts = state.accounts.filter(a =>
+        metric === 'net' ? true : a.kind === (metric === 'asset' ? 'asset' : 'liability'));
+    if (!accounts.length) {
+        container.innerHTML = '<div class="breakdown-empty">还没有账户，点右上角「账户」添加</div>';
         return;
     }
-    const entries = balancePieEntries(info, metric);
-    const total = entries.reduce((s, e) => s + e.signed, 0);
-    if (!entries.length) {
-        container.innerHTML = `<div class="breakdown-empty">该期没有${BAL_METRICS[metric].name}数据</div>`;
-        return;
-    }
-    const top = entries[0].signed || 1;
-    container.innerHTML = entries.map((e, i) => {
-        const a = accountById(e.id);
-        const color = a?.color || '#8e8e8e';
-        const pct = total ? (e.signed / total) * 100 : 0;
-        const sign = metric === 'net' && e.amount < 0 ? '-' : '';
+    const map = monthHasRecords(info.month) ? balancesAtMonth(info.month) : {};
+    const rows = accounts.map(a => {
+        const raw = map[a.id];
+        const amount = raw === undefined ? null
+            : (metric === 'net' && a.kind === 'liability' ? -raw : raw);
+        return { a, amount, signed: amount === null ? -1 : Math.abs(amount) };
+    });
+    rows.sort((x, y) => y.signed - x.signed);
+    const total = rows.reduce((sum, r) => sum + (r.signed > 0 ? r.signed : 0), 0);
+    const top = rows.length && rows[0].signed > 0 ? rows[0].signed : 1;
+
+    container.innerHTML = rows.map((r, i) => {
+        const a = r.a;
+        const color = a.color || '#8e8e8e';
+        const has = r.amount !== null;
+        const pct = has && total ? (r.signed / total) * 100 : 0;
+        const sign = metric === 'net' && r.amount < 0 ? '-' : '';
         return `
-            <div class="breakdown-item" onclick="openAccountHistoryForAccount('${e.id}')">
+            <div class="breakdown-item${has ? '' : ' bd-empty-row'}" onclick="openAccountHistoryForAccount('${a.id}')">
                 <div class="breakdown-icon" style="background:${color}22;color:${color}">
-                    <i class="fa-solid ${a?.icon || 'fa-ellipsis'}"></i>
+                    <i class="fa-solid ${a.icon || 'fa-ellipsis'}"></i>
                 </div>
                 <div class="breakdown-main">
                     <div class="breakdown-head">
-                        <span class="breakdown-name">${a?.name || '未知账户'}<span class="breakdown-rank">${i + 1}</span></span>
-                        <span class="breakdown-amount">${sign}${formatCurrency(Math.abs(e.amount))}<em>${pct.toFixed(1)}%</em></span>
+                        <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${i + 1}</span>` : ''}</span>
+                        <span class="breakdown-amount">${has ? `${sign}${formatCurrency(Math.abs(r.amount))}<em>${pct.toFixed(1)}%</em>` : '<span class="bd-no">未记录</span>'}</span>
                     </div>
-                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (e.signed / top) * 100)}%;background:${color}"></div></div>
+                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${has ? Math.max(3, (r.signed / top) * 100) : 0}%;background:${color}"></div></div>
                 </div>
-                <span class="bal-group-tag">${a?.group || ''}</span>
+                <span class="bal-group-tag">${a.group || ''}</span>
                 <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
             </div>`;
     }).join('');
@@ -3275,7 +3310,7 @@ function openAccountHistoryForAccount(accountId, fallbackName) {
 function openAccountHistoryForPeriod(month, label) {
     if (!month) return;
     historyAccountId = null;
-    const map = carriedBalances(month);
+    const map = balancesAtMonth(month);
     const t = totalsFromMap(map);
     const iconEl = document.getElementById('acctHistIcon');
     iconEl.style.background = 'var(--accent-light)';

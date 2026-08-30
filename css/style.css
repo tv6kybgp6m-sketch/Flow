@@ -2836,3 +2836,8 @@ body.cat-dragging {
     #view-balance .breakdown-amount { font-size: 12px; }
     .balance-modal .modal-body { max-height: calc(100dvh - 150px - env(safe-area-inset-top, 0px)); }
 }
+
+/* 资产负债：当月未记录的账户 */
+.bd-empty-row { opacity: 0.55; }
+.bd-empty-row:hover { opacity: 0.85; }
+.bd-no { font-size: 11px; font-weight: 400; color: var(--text-tertiary); font-style: italic; }
