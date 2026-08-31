@@ -2957,6 +2957,8 @@ body.cat-dragging {
         grid-template-columns: repeat(6, 1fr);
         gap: 2px 4px;
         margin-bottom: 0;
+        /* 锁定高度后，多余空白留在底部，不要被拉伸到行上 */
+        align-content: start;
     }
     #transactionModal .cat-pick-item { padding: 3px 1px; gap: 2px; }
     #transactionModal .cat-pick-icon { width: 30px; height: 30px; font-size: 13px; }

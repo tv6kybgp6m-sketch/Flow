@@ -1322,7 +1322,30 @@ function renderCategoryPicker() {
     if (!state.selectedCategoryId && cats.length > 0) {
         state.selectedCategoryId = cats[0].id;
         renderCategoryPicker();
+        return;
     }
+    lockPickerHeight(container);
+}
+
+// 电脑端：收入分类比支出少很多，宫格高度按两类中较多的一方锁定，
+// 切换支出/收入时弹窗尺寸保持不变。手机端不处理。
+function lockPickerHeight(container) {
+    if (!window.matchMedia('(min-width: 641px)').matches) {
+        container.style.minHeight = '';
+        return;
+    }
+    const item = container.querySelector('.cat-pick-item');
+    if (!item) { container.style.minHeight = ''; return; }
+    const style = getComputedStyle(container);
+    const cols = Math.max(1, (style.gridTemplateColumns || '').split(' ').filter(Boolean).length);
+    const maxCount = Math.max(
+        state.categories.filter(c => c.type === 'expense').length,
+        state.categories.filter(c => c.type === 'income').length
+    );
+    const rowH = item.getBoundingClientRect().height;
+    const gap = parseFloat(style.rowGap) || 0;
+    const rows = Math.max(1, Math.ceil(maxCount / cols));
+    container.style.minHeight = (rows * rowH + (rows - 1) * gap) + 'px';
 }
 
 function selectCategory(id) {
