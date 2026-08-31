@@ -3816,8 +3816,12 @@ function initEventListeners() {
         if (e.key === 'Enter' && document.activeElement?.id === 'noteInput') {
             saveTransaction();
         }
-        // Numeric / operator keys when the transaction modal is open
-        if (!document.getElementById('transactionModal').classList.contains('hidden')) {
+        // Numeric / operator keys when the transaction modal is open.
+        // Skipped while the caret sits in an editable field, so typing a note or a
+        // date goes to that field instead of the calculator (and Enter doesn't double-save).
+        const ae = document.activeElement;
+        const typingInField = !!(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT') && !ae.readOnly);
+        if (!typingInField && !document.getElementById('transactionModal').classList.contains('hidden')) {
             if (/^[0-9.+\-]$/.test(e.key)) {
                 e.preventDefault();
                 numpadPress(e.key);

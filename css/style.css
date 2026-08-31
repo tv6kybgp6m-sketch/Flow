@@ -2920,3 +2920,59 @@ body.cat-dragging {
     .tds { font-size: 10px; }
     .txn-group .transaction-list { padding: 2px 4px; }
 }
+
+/* ============================================
+   记一笔弹窗：桌面端采用与手机端一致的紧凑布局
+   （去掉数字键盘，改用物理键盘输入）
+   ============================================ */
+#transactionModal .txn-footer { display: none; }
+.amount-hint { display: none; }
+
+@media (min-width: 641px) {
+    #transactionModal .modal {
+        width: 460px;
+        max-width: 92vw;
+    }
+    #transactionModalTitle { display: none !important; }
+    #transactionModal .modal-header {
+        justify-content: flex-end;
+        border-bottom: none;
+        padding: 14px 18px 2px;
+    }
+    #transactionModal .modal-body {
+        padding: 6px 18px 4px;
+        max-height: 70vh;
+    }
+    #transactionModal .form-group > label { display: none !important; }
+    #transactionModal .type-toggle { margin-top: 0; margin-bottom: 14px; }
+    #transactionModal .form-group { margin-bottom: 12px; }
+    #transactionModal .amount-input-wrapper { padding: 0 12px; }
+    #transactionModal .amount-input {
+        font-size: 30px;
+        padding: 6px 0;
+        cursor: text;
+    }
+    #transactionModal .amount-expression { min-height: 16px; font-size: 12px; margin-top: 2px; }
+    .amount-hint {
+        display: block;
+        font-size: 11px;
+        color: var(--text-tertiary);
+        margin-top: 4px;
+    }
+    #transactionModal .category-picker {
+        grid-template-columns: repeat(6, 1fr);
+        gap: 6px;
+    }
+    #transactionModal .cat-pick-item { padding: 7px 2px; gap: 4px; }
+    #transactionModal .cat-pick-icon { width: 34px; height: 34px; font-size: 14px; }
+    #transactionModal .cat-pick-name { font-size: 11px; }
+    #transactionModal .form-row { gap: 10px; margin-bottom: 12px; }
+    #transactionModal .text-input { padding: 8px 10px; font-size: 14px; }
+    #transactionModal .numpad { display: none !important; }
+    #transactionModal .txn-footer {
+        display: flex;
+        padding: 12px 18px;
+    }
+    #transactionModal .txn-footer .primary-btn { min-width: 96px; justify-content: center; }
+    #transactionModal .txn-footer .secondary-btn { justify-content: center; }
+}
