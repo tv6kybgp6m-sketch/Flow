@@ -156,6 +156,37 @@ function saveState() {
     scheduleICloudSync();
 }
 
+// ---- Modal stacking ----
+// Every overlay used to sit at z-index 1000, so a modal opened from inside another
+// modal (报表分析 → 分类明细 → 点某笔记录) ended up painted *behind* its parent.
+// Each open now takes the next slot in the stack.
+let overlayZ = 1000;
+
+function raiseOverlay(id) {
+    const el = typeof id === 'string' ? document.getElementById(id) : id;
+    if (!el) return;
+    overlayZ += 10;
+    el.style.zIndex = String(overlayZ);
+}
+
+function topmostOverlay() {
+    let best = null, bestZ = -1;
+    document.querySelectorAll('.modal-overlay, .action-sheet-overlay').forEach(el => {
+        if (el.classList.contains('hidden')) return;
+        const z = parseInt(getComputedStyle(el).zIndex, 10) || 0;
+        if (z > bestZ) { bestZ = z; best = el; }
+    });
+    return best;
+}
+
+function closeTopmostOverlay() {
+    const top = topmostOverlay();
+    if (!top) return;
+    if (top.id === 'categoryTxnModal') closeCategoryTxnModal();
+    else if (top.id === 'accountHistoryModal') closeAccountHistoryModal();
+    else top.classList.add('hidden');
+}
+
 // ---- Soft delete (tombstones) ----
 // Deleting a record keeps a marker behind so the removal can travel to other
 // devices: a plain union merge could only ever add rows, never remove them.
@@ -1047,6 +1078,7 @@ function openTransactionModal(id) {
     renderCategoryPicker();
 
     modal.classList.remove('hidden');
+    raiseOverlay(modal);
     // Amount is now entered via the custom number pad below; no system keyboard needed
 }
 
@@ -2055,6 +2087,7 @@ function openLedger({ title, subtitle, ids, txns, bucket = null }) {
     document.getElementById('catTxnSubtitle').textContent = subtitle;
     renderCategoryLedger();
     document.getElementById('categoryTxnModal').classList.remove('hidden');
+    raiseOverlay('categoryTxnModal');
 }
 
 function renderCategoryLedger() {
@@ -2182,6 +2215,7 @@ function openBudgetModal() {
     select.innerHTML = expenseCats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
     document.getElementById('budgetAmountInput').value = '';
     document.getElementById('budgetModal').classList.remove('hidden');
+    raiseOverlay('budgetModal');
 }
 
 function closeBudgetModal() {
@@ -2273,6 +2307,7 @@ function openCategoryModal(id) {
     renderIconPicker();
     renderColorPicker();
     modal.classList.remove('hidden');
+    raiseOverlay(modal);
 }
 
 function closeCategoryModal() {
@@ -2401,6 +2436,7 @@ function openCatActionSheet(id) {
     icon.innerHTML = `<i class="fa-solid ${c.icon}"></i>`;
     document.getElementById('catSheetTitle').textContent = c.name;
     document.getElementById('catActionSheet').classList.remove('hidden');
+    raiseOverlay('catActionSheet');
 }
 
 function closeCatActionSheet() {
@@ -3350,6 +3386,7 @@ function openAccountHistoryForAccount(accountId, fallbackName) {
     del.onclick = () => deleteAccountFromHistory(accountId);
     renderAccountHistory();
     document.getElementById('accountHistoryModal').classList.remove('hidden');
+    raiseOverlay('accountHistoryModal');
 }
 
 function openAccountHistoryForPeriod(month, label) {
@@ -3384,6 +3421,7 @@ function openAccountHistoryForPeriod(month, label) {
             </div>`).join('')
         : '<div class="breakdown-empty">该期没有余额记录</div>';
     document.getElementById('accountHistoryModal').classList.remove('hidden');
+    raiseOverlay('accountHistoryModal');
 }
 
 function renderAccountHistory() {
@@ -3448,6 +3486,7 @@ function openBalanceModal(month) {
     input.value = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
     renderBalanceEntry();
     document.getElementById('balanceModal').classList.remove('hidden');
+    raiseOverlay('balanceModal');
 }
 
 function closeBalanceModal() {
@@ -3536,6 +3575,7 @@ function openAccountsModal() {
     sel.innerHTML = (kind => (kind === 'asset' ? ASSET_GROUPS : LIABILITY_GROUPS).map(g => `<option>${g}</option>`).join(''))(document.getElementById('newAccountKind').value);
     renderAccountManageList();
     document.getElementById('accountsModal').classList.remove('hidden');
+    raiseOverlay('accountsModal');
 }
 
 function closeAccountsModal() { document.getElementById('accountsModal').classList.add('hidden'); }
@@ -3768,13 +3808,9 @@ function initEventListeners() {
             switchView('transactions');
             openTransactionModal();
         }
-        // Escape: Close the topmost modal
+        // Escape: close only the overlay on top, so a drill-down list stays open behind it
         if (e.key === 'Escape') {
-            if (!document.getElementById('categoryTxnModal').classList.contains('hidden')) {
-                closeCategoryTxnModal();
-            } else {
-                document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
-            }
+            closeTopmostOverlay();
         }
         // Enter in note input: Save (works since amount input is now readonly)
         if (e.key === 'Enter' && document.activeElement?.id === 'noteInput') {
