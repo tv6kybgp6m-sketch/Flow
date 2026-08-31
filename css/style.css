@@ -2841,3 +2841,82 @@ body.cat-dragging {
 .bd-empty-row { opacity: 0.55; }
 .bd-empty-row:hover { opacity: 0.85; }
 .bd-no { font-size: 11px; font-weight: 400; color: var(--text-tertiary); font-style: italic; }
+
+/* ============================================
+   交易记录：按天分组的时间线
+   ============================================ */
+#allTransactions {
+    background: none;
+    padding: 0;
+    box-shadow: none;
+    overflow: visible;
+    gap: 12px;
+}
+
+.txn-group {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.txn-day {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 14px;
+    background: var(--bg-content);
+    border-bottom: 0.5px solid var(--divider);
+}
+
+.txn-day-date {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.2px;
+}
+
+.txn-day-sum { display: flex; align-items: center; gap: 10px; }
+.tds { font-size: 11px; font-weight: 600; }
+.tds.income { color: var(--income); }
+.tds.expense { color: var(--expense); }
+
+.txn-group .transaction-list { padding: 4px 8px; }
+.txn-group .transaction-item { border-radius: var(--radius-sm); }
+
+/* 备注为空时这一行只剩支付方式，保持行高一致 */
+.transaction-note { display: flex; align-items: center; gap: 4px; min-height: 15px; }
+.txn-note-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.transaction-item .transaction-amount { flex-shrink: 0; }
+
+/* 流水弹窗：同一套时间线，但去掉卡片感、表头吸顶 */
+.cat-txn-body .txn-group {
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    overflow: visible;
+    margin-bottom: 2px;
+}
+.cat-txn-body .txn-day {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--bg-modal);
+    padding: 6px 6px;
+    border-bottom: none;
+}
+.cat-txn-body .txn-group .transaction-list { padding: 0; }
+
+@media (max-width: 640px) {
+    #allTransactions { gap: 8px; }
+    .txn-day { padding: 6px 10px; }
+    .txn-day-date { font-size: 11px; }
+    .tds { font-size: 10px; }
+    .txn-group .transaction-list { padding: 2px 4px; }
+}

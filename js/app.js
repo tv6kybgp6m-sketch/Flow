@@ -875,9 +875,10 @@ function transactionItemHTML(t) {
     const color = cat?.color || '#636e72';
     const name = cat?.name || '未知';
     const sign = t.type === 'income' ? '+' : '-';
-    const noteText = t.note ? t.note : name;
     const payment = t.paymentMethod || '现金';
     const paymentIcon = paymentIconFor(payment);
+    // 没填备注就留空，不再重复显示分类名
+    const noteHtml = t.note ? `<span class="txn-note-text">${escapeHtml(t.note)}</span> ` : '';
 
     return `
         <div class="transaction-item" onclick="editTransaction('${t.id}')">
@@ -886,12 +887,56 @@ function transactionItemHTML(t) {
             </div>
             <div class="transaction-info">
                 <div class="transaction-category">${name}</div>
-                <div class="transaction-note">${noteText} <span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span></div>
+                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span></div>
             </div>
-            <div class="transaction-date"><span class="date-full">${formatDate(t.date)}</span><span class="date-short">${formatDateShort(t.date)}</span></div>
             <div class="transaction-amount ${t.type}">${sign}${formatCurrency(t.amount)}</div>
         </div>
     `;
+}
+
+function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 表头用的日期：今天 / 昨天 / 8月24日 / 2025年8月24日
+function formatDayHeader(dateStr) {
+    const d = parseLocalDate(dateStr);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const only = new Date(d); only.setHours(0, 0, 0, 0);
+    const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+    if (only.getTime() === today.getTime()) return '今天';
+    if (only.getTime() === yest.getTime()) return '昨天';
+    if (d.getFullYear() === today.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+const txnDayKey = t => String(t.date).slice(0, 10);
+
+// 按天分组的时间线：同一天只显示一个日期表头 + 当日小计
+function transactionGroupsHTML(txns) {
+    const groups = [];
+    txns.forEach(t => {
+        const key = txnDayKey(t);
+        const last = groups[groups.length - 1];
+        if (last && last.key === key) last.rows.push(t);
+        else groups.push({ key, date: t.date, rows: [t] });
+    });
+    return groups.map(g => {
+        const inc = g.rows.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+        const exp = g.rows.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+        const sum = [
+            inc ? `<span class="tds income">+${formatCurrency(inc)}</span>` : '',
+            exp ? `<span class="tds expense">-${formatCurrency(exp)}</span>` : '',
+        ].join('');
+        return `
+        <div class="txn-group">
+            <div class="txn-day">
+                <span class="txn-day-date">${formatDayHeader(g.date)}</span>
+                <span class="txn-day-sum">${sum}</span>
+            </div>
+            <div class="transaction-list">${g.rows.map(t => transactionItemHTML(t)).join('')}</div>
+        </div>`;
+    }).join('');
 }
 
 function renderTransactions() {
@@ -930,7 +975,7 @@ function renderTransactions() {
         empty.classList.remove('hidden');
     } else {
         empty.classList.add('hidden');
-        container.innerHTML = filtered.map(t => transactionItemHTML(t)).join('');
+        container.innerHTML = transactionGroupsHTML(filtered);
     }
 }
 
@@ -2036,7 +2081,7 @@ function renderCategoryLedger() {
             `<span class="cat-txn-summary-item expense">支出 <b>${formatCurrency(expense)}</b></span>`);
     }
     summary.innerHTML = parts.join('');
-    list.innerHTML = sorted.map(t => transactionItemHTML(t)).join('');
+    list.innerHTML = transactionGroupsHTML(sorted);
 }
 
 function closeCategoryTxnModal() {
