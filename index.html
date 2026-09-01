@@ -321,6 +321,22 @@
                         </div>
                         <div class="breakdown-list" id="balBreakdownList"></div>
                     </div>
+                    <div class="chart-card hidden" id="balanceStatsCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>资产负债统计</h3>
+                                <span class="chart-subtitle" id="balanceStatsSubtitle"></span>
+                            </div>
+                        </div>
+                        <div class="bill-stats-wrap">
+                            <table class="bill-stats">
+                                <thead>
+                                    <tr><th>日期</th><th>资产</th><th>负债</th><th>净资产</th></tr>
+                                </thead>
+                                <tbody id="balanceStatsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Budget View -->
@@ -469,7 +485,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.7.8</div>
+                                    <div class="about-version">版本 1.7.9</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -765,7 +781,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.7.8').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.7.9').catch(() => {});
             });
         }
     </script>

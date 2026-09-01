@@ -3192,6 +3192,43 @@ function setBalanceMetric(metric) {
     renderBalanceBreakdown();
 }
 
+// 资产负债统计：只在年报 / 总 两个视图出现，逐月一行，日期从新到旧
+function renderBalanceStats() {
+    const card = document.getElementById('balanceStatsCard');
+    const body = document.getElementById('balanceStatsBody');
+    if (!card || !body) return;
+    if (state.balancePeriod === 'month') {
+        card.classList.add('hidden');
+        body.innerHTML = '';
+        return;
+    }
+    card.classList.remove('hidden');
+
+    const all = balanceMonths();
+    const months = state.balancePeriod === 'year'
+        ? all.filter(m => m.slice(0, 4) === String(state.balanceYear || new Date().getFullYear()))
+        : all;
+    document.getElementById('balanceStatsSubtitle').textContent =
+        state.balancePeriod === 'year' ? `${state.balanceYear}年 · 逐月` : '全部月份 · 逐月';
+
+    if (months.length === 0) {
+        body.innerHTML = '<tr><td colspan="4" class="bs-empty">该范围还没有余额记录</td></tr>';
+        return;
+    }
+    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
+    body.innerHTML = months.slice().reverse().map(m => {
+        const t = totalsFromMap(balancesAtMonth(m));
+        const [y, mm] = m.split('-');
+        return `
+        <tr class="bs-row" onclick="openAccountHistoryForPeriod('${m}', '${y}年${Number(mm)}月')">
+            <td class="bs-label">${state.balancePeriod === 'year' ? `${Number(mm)}月` : `${y}年${Number(mm)}月`}</td>
+            <td>${money(t.asset, 'income')}</td>
+            <td>${money(t.liability, 'expense')}</td>
+            <td>${money(t.net)}</td>
+        </tr>`;
+    }).join('');
+}
+
 function setBalanceChartType(type) {
     if (state.balanceChartType === type) return;
     state.balanceChartType = type;
@@ -3237,6 +3274,7 @@ function renderBalance() {
 
     renderBalanceChart();
     renderBalanceBreakdown();
+    renderBalanceStats();
 }
 
 function balanceTrendMonths() {
