@@ -1596,20 +1596,27 @@ function renderBillStats() {
     const sumOf = rows => {
         const exp = rows.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
         const inc = rows.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-        return { exp, net: inc - exp };
+        return { inc, exp, net: inc - exp };
     };
     const total = sumOf(txns);
     const periods = byDay ? getReportDays(txns, range) : list.length;
     const avgLabel = byDay ? '日均' : '月均';
     const dayLabel = b => byDay ? `${b.m}月${b.d}日` : (range.period === 'year' ? `${b.m}月` : `${b.y}年${b.m}月`);
-    const money = v => `<span class="bs-num${v < 0 ? ' neg' : ''}">${formatCurrency(v)}</span>`;
+    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
 
-    const avg = sumOf(txns);
+    // 合计行紧跟表头，其后是日均/月均行
     const rows = [`
+        <tr class="bs-total">
+            <td class="bs-label">合计</td>
+            <td>${money(total.inc, 'income')}</td>
+            <td>${money(total.exp, 'expense')}</td>
+            <td>${money(total.net)}</td>
+        </tr>`, `
         <tr class="bs-avg">
             <td class="bs-label">${avgLabel}</td>
-            <td>${money(periods ? avg.exp / periods : 0)}</td>
-            <td>${money(periods ? avg.net / periods : 0)}</td>
+            <td>${money(periods ? total.inc / periods : 0)}</td>
+            <td>${money(periods ? total.exp / periods : 0)}</td>
+            <td>${money(periods ? total.net / periods : 0)}</td>
         </tr>`];
 
     list.forEach(b => {
@@ -1617,6 +1624,7 @@ function renderBillStats() {
         rows.push(`
         <tr class="bs-row" onclick="openBillStatsLedger(${b.y}, ${b.m}, ${byDay ? b.d : 'null'}, '${dayLabel(b)}')">
             <td class="bs-label">${dayLabel(b)}</td>
+            <td>${money(st.inc)}</td>
             <td>${money(st.exp)}</td>
             <td>${money(st.net)}</td>
         </tr>`);

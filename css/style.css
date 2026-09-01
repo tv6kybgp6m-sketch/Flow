@@ -3044,3 +3044,13 @@ table.bill-stats {
     .bill-stats th, .bill-stats td { padding: 6px; font-size: 12px; }
     .bill-stats td.bs-label { font-size: 12px; }
 }
+
+/* 账单统计：合计行与收入列 */
+.bill-stats tr.bs-total { background: var(--bg-content); }
+.bill-stats tr.bs-total td { font-weight: 700; border-bottom: 1px solid var(--border); }
+.bill-stats tr.bs-total td.bs-label { color: var(--text-primary); }
+.bill-stats tr.bs-avg td { font-weight: 500; }
+.bill-stats tr.bs-avg { background: none; }
+.bill-stats tr.bs-avg td.bs-label { color: var(--accent); }
+.bs-num.income { color: var(--income); }
+.bs-num.expense { color: var(--expense); }
