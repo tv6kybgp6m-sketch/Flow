@@ -121,6 +121,7 @@ let state = {
     deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     reportMetric: 'expense',
+    breakdownExpanded: false,
     reportChartType: 'line',
     reportGranularity: null,
     editingTransactionId: null,
@@ -1565,6 +1566,73 @@ function renderReports() {
     document.getElementById('reportDailyAvg').textContent = formatCurrency(dailyAvg);
 
     renderDrillChart();
+    renderBillStats();
+}
+
+// ---- Reports: 账单统计 ----
+// 月报 → 日均 + 每天；年报/总 → 月均 + 每月。日期一律从新到旧排。
+function renderBillStats() {
+    const body = document.getElementById('billStatsBody');
+    if (!body) return;
+    const { range, txns } = getReportFiltered();
+    const subtitle = document.getElementById('billStatsSubtitle');
+    subtitle.textContent = range.label;
+
+    if (txns.length === 0) {
+        body.innerHTML = `<tr><td colspan="3" class="bs-empty">${range.label}暂无账单记录</td></tr>`;
+        return;
+    }
+
+    const byDay = range.period === 'month';
+    const buckets = new Map();
+    txns.forEach(t => {
+        const d = parseLocalDate(t.date);
+        const key = byDay ? `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` : `${d.getFullYear()}-${d.getMonth() + 1}`;
+        if (!buckets.has(key)) buckets.set(key, { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), rows: [] });
+        buckets.get(key).rows.push(t);
+    });
+    const list = [...buckets.values()].sort((a, b) => b.y - a.y || b.m - a.m || b.d - a.d);
+
+    const sumOf = rows => {
+        const exp = rows.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+        const inc = rows.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+        return { exp, net: inc - exp };
+    };
+    const total = sumOf(txns);
+    const periods = byDay ? getReportDays(txns, range) : list.length;
+    const avgLabel = byDay ? '日均' : '月均';
+    const dayLabel = b => byDay ? `${b.m}月${b.d}日` : (range.period === 'year' ? `${b.m}月` : `${b.y}年${b.m}月`);
+    const money = v => `<span class="bs-num${v < 0 ? ' neg' : ''}">${formatCurrency(v)}</span>`;
+
+    const avg = sumOf(txns);
+    const rows = [`
+        <tr class="bs-avg">
+            <td class="bs-label">${avgLabel}</td>
+            <td>${money(periods ? avg.exp / periods : 0)}</td>
+            <td>${money(periods ? avg.net / periods : 0)}</td>
+        </tr>`];
+
+    list.forEach(b => {
+        const st = sumOf(b.rows);
+        rows.push(`
+        <tr class="bs-row" onclick="openBillStatsLedger(${b.y}, ${b.m}, ${byDay ? b.d : 'null'}, '${dayLabel(b)}')">
+            <td class="bs-label">${dayLabel(b)}</td>
+            <td>${money(st.exp)}</td>
+            <td>${money(st.net)}</td>
+        </tr>`);
+    });
+    body.innerHTML = rows.join('');
+}
+
+function openBillStatsLedger(y, m, d, label) {
+    const { range } = getReportFiltered();
+    const hit = state.transactions.filter(t => {
+        if (!inRange(t.date, range)) return false;
+        const dt = parseLocalDate(t.date);
+        if (dt.getFullYear() !== y || dt.getMonth() + 1 !== m) return false;
+        return d === null || dt.getDate() === d;
+    });
+    openLedger({ title: label, subtitle: `账单明细 · ${range.label}`, ids: [], txns: hit, bucket: null, ignoreMetric: true });
 }
 
 // ---- Reports: drill-down ----
@@ -1573,6 +1641,7 @@ let drillRenderToken = 0;
 let catLedgerTxns = [];
 let catLedgerIds = [];
 let catLedgerBucket = null;   // set when the ledger came from a trend point
+let catLedgerIgnoreMetric = false;  // 账单统计的弹窗固定收支都显示
 
 function defaultGranularity(period) {
     return period === 'all' ? 'year' : (period === 'year' ? 'month' : 'day');
@@ -1658,6 +1727,7 @@ function updateReportToggleStates() {
 function setReportMetric(metric) {
     if (!METRIC_META[metric] || state.reportMetric === metric) return;
     state.reportMetric = metric;
+    state.breakdownExpanded = false;
     renderDrillChart();
 }
 
@@ -2046,8 +2116,11 @@ function renderBreakdownList() {
     const denominator = metric === 'balance' ? sums.net : sums.gross;
     hint.textContent = metric === 'balance' ? '占比 = 该分类净额 ÷ 净结余' : '点击分类查看每笔流水';
     const top = entries[0].signed || 1;
-    // show every category, not just the leading ones
-    const rows = entries.map((e, i) => {
+    // 默认只列前 10 个分类，其余折叠，点「展开」看全部
+    const COLLAPSED = 10;
+    const shown = state.breakdownExpanded ? entries : entries.slice(0, COLLAPSED);
+    const hiddenCount = entries.length - shown.length;
+    const rows = shown.map((e, i) => {
         const cat = getCategoryById(e.id);
         const color = cat?.color || '#8e8e8e';
         const pct = denominator ? ((metric === 'balance' ? e.amount : e.signed) / denominator) * 100 : 0;
@@ -2067,7 +2140,18 @@ function renderBreakdownList() {
                 <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
             </div>`;
     }).join('');
-    container.innerHTML = rows;
+    let toggle = '';
+    if (entries.length > COLLAPSED) {
+        toggle = state.breakdownExpanded
+            ? `<button class="breakdown-toggle" onclick="toggleBreakdown()"><i class="fa-solid fa-chevron-up"></i> 收起</button>`
+            : `<button class="breakdown-toggle" onclick="toggleBreakdown()"><i class="fa-solid fa-chevron-down"></i> 展开其余 ${hiddenCount} 个分类</button>`;
+    }
+    container.innerHTML = rows + toggle;
+}
+
+function toggleBreakdown() {
+    state.breakdownExpanded = !state.breakdownExpanded;
+    renderBreakdownList();
 }
 
 // ---- Reports: ledger modal (category / trend bucket) ----
@@ -2096,10 +2180,11 @@ function ledgerScope(txns, ids, metric) {
     });
 }
 
-function openLedger({ title, subtitle, ids, txns, bucket = null }) {
+function openLedger({ title, subtitle, ids, txns, bucket = null, ignoreMetric = false }) {
     catLedgerTxns = txns;
     catLedgerIds = ids || [];
     catLedgerBucket = bucket;
+    catLedgerIgnoreMetric = ignoreMetric;
     const single = catLedgerIds.length === 1 ? getCategoryById(catLedgerIds[0]) : null;
     const color = single?.color || 'var(--accent)';
     const iconEl = document.getElementById('catTxnIcon');
@@ -2157,7 +2242,7 @@ function refreshCategoryLedger() {
         const inBucket = t => granularityValue(parseLocalDate(t.date), gran) === catLedgerBucket;
         catLedgerTxns = txns.filter(t => inBucket(t) && (state.reportMetric === 'balance' || t.type === state.reportMetric));
     } else {
-        catLedgerTxns = ledgerScope(txns, catLedgerIds, state.reportMetric);
+        catLedgerTxns = ledgerScope(txns, catLedgerIds, catLedgerIgnoreMetric ? 'balance' : state.reportMetric);
     }
     renderCategoryLedger();
 }
