@@ -1,10 +1,15 @@
-const CACHE_NAME = 'bookkeeping-v1.8.0';
+const CACHE_NAME = 'bookkeeping-v1.8.1';
 const PRECACHE = [
   './',
   './index.html',
   './css/style.css',
   './js/app.js',
   './js/xlsx.full.min.js',
+  './vendor/chart.umd.min.js',
+  './vendor/fontawesome/css/all.min.css',
+  './vendor/fontawesome/webfonts/fa-solid-900.woff2',
+  './vendor/fontawesome/webfonts/fa-regular-400.woff2',
+  './vendor/fontawesome/webfonts/fa-brands-400.woff2',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

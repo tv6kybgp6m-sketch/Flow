@@ -16,6 +16,13 @@ HTML + CSS + JavaScript + Chart.js + SheetJS
 
 ## 更新日志
 
+### v1.8.1
+
+- Chart.js 与 Font Awesome 从境外 CDN 改为**本地自托管**（`vendor/`），彻底不依赖 cdnjs
+- 解决手机端主屏幕打开时「一直白屏、然后突然出现」：之前这两个资源是阻塞首屏的外部请求，大陆访问 cdnjs 慢或超时时整页被卡住
+- 自托管后冷启动不再有任何外部域名请求；这些文件一并纳入 Service Worker 预缓存，离线可用
+- 整站资源同源，配合 v1.8.0 的 cache-first 策略，冷启动只需等本机文件
+
 ### v1.8.0
 
 - 优化冷启动速度：静态资源（JS/CSS/图标/Chart.js/字体）改为 cache-first，从缓存秒开，不再每次冷启动等境外服务器往返
