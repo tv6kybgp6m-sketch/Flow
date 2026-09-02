@@ -756,7 +756,7 @@ function showToast(message, type = 'success') {
 function switchView(viewName) {
     state.currentView = viewName;
     const win = document.querySelector('.mac-window');
-    if (win) win.classList.toggle('show-balance-fab', viewName === 'balance');
+    if (win) win.classList.toggle('show-txn-fab', viewName === 'transactions');
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.view === viewName);
     });
