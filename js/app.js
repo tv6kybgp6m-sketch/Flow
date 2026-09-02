@@ -1037,12 +1037,52 @@ function renderTransactions() {
     const empty = document.getElementById('emptyTransactions');
 
     if (filtered.length === 0) {
+        txnRenderList = [];
+        txnRenderedTo = 0;
         container.innerHTML = '';
         empty.classList.remove('hidden');
-    } else {
-        empty.classList.add('hidden');
-        container.innerHTML = transactionGroupsHTML(filtered);
+        return;
     }
+    empty.classList.add('hidden');
+    // Render in day-sized chunks instead of the whole history at once. With many
+    // records, one giant innerHTML was what made switching to this view stall.
+    txnRenderList = filtered;
+    txnRenderedTo = 0;
+    container.innerHTML = '';
+    // start from the top so a lingering bottom scroll position doesn't
+    // immediately cascade-load several chunks
+    const scroller = document.querySelector('.main-content');
+    if (scroller) scroller.scrollTop = 0;
+    appendTxnChunk();
+}
+
+// ---- Transactions infinite render ----
+let txnRenderList = [];
+let txnRenderedTo = 0;
+const TXN_CHUNK = 60;
+
+function appendTxnChunk() {
+    if (txnRenderedTo >= txnRenderList.length) return;
+    const target = Math.min(txnRenderList.length, txnRenderedTo + TXN_CHUNK);
+    let end = txnRenderedTo;
+    // grow whole day-groups at a time so a day is never split across chunks
+    while (end < txnRenderList.length && end < target) {
+        const k = txnDayKey(txnRenderList[end]);
+        while (end < txnRenderList.length && txnDayKey(txnRenderList[end]) === k) end++;
+    }
+    const chunk = txnRenderList.slice(txnRenderedTo, end);
+    txnRenderedTo = end;
+    document.getElementById('allTransactions').insertAdjacentHTML('beforeend', transactionGroupsHTML(chunk));
+}
+
+function initTxnInfiniteScroll() {
+    const scroller = document.querySelector('.main-content');
+    if (!scroller) return;
+    scroller.addEventListener('scroll', () => {
+        if (state.currentView !== 'transactions') return;
+        if (txnRenderedTo >= txnRenderList.length) return;
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 400) appendTxnChunk();
+    }, { passive: true });
 }
 
 function updateMonthFilter() {
@@ -3940,6 +3980,9 @@ function initEventListeners() {
             renderReports();
         });
     });
+
+    // Transactions list: lazy chunked rendering
+    initTxnInfiniteScroll();
 
     // Report drill-down (metric cards / chart type / granularity)
     initReportDrillListeners();
