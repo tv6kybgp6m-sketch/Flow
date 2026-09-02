@@ -16,6 +16,14 @@ HTML + CSS + JavaScript + Chart.js + SheetJS
 
 ## 更新日志
 
+### v1.8.2
+
+- 首屏白屏根治：Chart.js（200KB）与 Excel 库（881KB）不再在 `<head>` 阻塞加载，改为**按需加载**
+  - Excel 库只在点「导入/导出 Excel」时才下载执行
+  - Chart.js 在首屏渲染后后台预热，进报表/资产负债时若未就绪会自动补渲染
+- 手机冷启动需要解析执行的 JS 从约 1.25MB 降到只剩 app.js（166KB）
+- 重度降频实测：首屏 1.97s → 1.25s（约快 37%，越弱的手机提升越明显）
+
 ### v1.8.1
 
 - Chart.js 与 Font Awesome 从境外 CDN 改为**本地自托管**（`vendor/`），彻底不依赖 cdnjs

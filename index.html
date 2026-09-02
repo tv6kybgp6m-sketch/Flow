@@ -22,8 +22,6 @@
     <title>记账本</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <script src="vendor/chart.umd.min.js"></script>
-    <script src="js/xlsx.full.min.js"></script>
 </head>
 <body>
     <div class="mac-window">
@@ -484,7 +482,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.8.1</div>
+                                    <div class="about-version">版本 1.8.2</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -780,7 +778,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.8.1').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.8.2').catch(() => {});
             });
         }
     </script>

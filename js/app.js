@@ -2,6 +2,40 @@
    记账本 Bookkeeping - App Logic
    ============================================ */
 
+// ---- On-demand library loading ----
+// Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
+// <head>, so the phone had to parse and execute ~1MB of JS before painting the
+// first screen — that was the white screen. They now load only when needed.
+let __chartPromise = null;
+function loadChartLib() {
+    if (typeof Chart !== 'undefined') return Promise.resolve();
+    if (!__chartPromise) {
+        __chartPromise = new Promise((resolve, reject) => {
+            const el = document.createElement('script');
+            el.src = 'vendor/chart.umd.min.js';
+            el.onload = () => resolve();
+            el.onerror = () => { __chartPromise = null; reject(new Error('chart load failed')); };
+            document.head.appendChild(el);
+        });
+    }
+    return __chartPromise;
+}
+
+let __xlsxPromise = null;
+function loadXlsxLib() {
+    if (typeof XLSX !== 'undefined') return Promise.resolve();
+    if (!__xlsxPromise) {
+        __xlsxPromise = new Promise((resolve, reject) => {
+            const el = document.createElement('script');
+            el.src = 'js/xlsx.full.min.js';
+            el.onload = () => resolve();
+            el.onerror = () => { __xlsxPromise = null; reject(new Error('xlsx load failed')); };
+            document.head.appendChild(el);
+        });
+    }
+    return __xlsxPromise;
+}
+
 // ---- Default Data ----
 const DEFAULT_EXPENSE_CATEGORIES = [
     { id: 'e_food', name: '餐饮', icon: 'fa-utensils', color: '#ff6b6b', type: 'expense' },
@@ -1829,6 +1863,7 @@ function openBucketLedger(bucketIndex) {
 }
 
 function renderDrillTrend(ctx, txns, range, gran, metric, chartType) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderDrillTrend(ctx, txns, range, gran, metric, chartType)).catch(() => {}); return; }
     if (charts.drill) { charts.drill.destroy(); charts.drill = null; }
     const legendBox = document.getElementById('pieLegend');
     if (legendBox) { legendBox.innerHTML = ''; legendBox.classList.add('hidden'); }
@@ -2027,6 +2062,7 @@ function topPieEntries(entries) {
 }
 
 function renderDrillPie(ctx, txns, metric) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderDrillPie(ctx, txns, metric)).catch(() => {}); return; }
     if (charts.drill) { charts.drill.destroy(); charts.drill = null; }
     const { entries: allEntries, sums } = categoryTotals(txns, metric);
     const entries = topPieEntries(allEntries);
@@ -2789,8 +2825,8 @@ function setAutoOpenAdd(enabled) {
 // ---- Data Export/Import (Excel) ----
 function exportData() {
     if (typeof XLSX === 'undefined') {
-        showToast('Excel 库未加载，请刷新页面重试', 'error');
-        console.error('XLSX library not loaded');
+        showToast('正在加载 Excel 组件…', 'info');
+        loadXlsxLib().then(() => exportData()).catch(() => showToast('Excel 组件加载失败', 'error'));
         return;
     }
 
@@ -2886,8 +2922,8 @@ function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
     if (typeof XLSX === 'undefined') {
-        showToast('Excel 库未加载，请刷新页面重试', 'error');
-        event.target.value = '';
+        showToast('正在加载 Excel 组件…', 'info');
+        loadXlsxLib().then(() => importData(event)).catch(() => { showToast('Excel 组件加载失败', 'error'); event.target.value = ''; });
         return;
     }
     const reader = new FileReader();
@@ -3348,6 +3384,7 @@ function balanceValueAt(month, metric) {
 }
 
 function renderBalanceTrend(ctx, chartType, meta, metric) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalanceTrend(ctx, chartType, meta, metric)).catch(() => {}); return; }
     if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
     const buckets = balanceTrendMonths();
     const values = buckets.map(b => balanceValueAt(b.key, metric));
@@ -3423,6 +3460,7 @@ function balancePieEntries(info, metric) {
 }
 
 function renderBalancePie(ctx, info) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalancePie(ctx, info)).catch(() => {}); return; }
     if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
     const metric = state.balanceMetric;
     const entries = topPieEntries(balancePieEntries(info, metric));
@@ -4021,6 +4059,9 @@ function init() {
     if (state.settings.autoOpenAdd) {
         setTimeout(() => openTransactionModal(), 300);
     }
+
+    // Warm up Chart.js in the background once the first screen is on screen
+    setTimeout(() => { if (typeof Chart === 'undefined') loadChartLib().catch(() => {}); }, 1200);
 
     // Initialize iCloud sync
     setTimeout(() => initICloudSync(), 500);
