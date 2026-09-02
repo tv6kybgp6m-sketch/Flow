@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookkeeping-v1.8.2';
+const CACHE_NAME = 'bookkeeping-v1.8.3';
 const PRECACHE = [
   './',
   './index.html',
@@ -60,6 +60,23 @@ async function cacheFirst(request) {
   return cacheAndReturn(request, response);
 }
 
+// Serve a navigation from cache when possible, else fall back to the network.
+async function serveNavigation(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = (await cache.match(request, { ignoreSearch: true }))
+    || (await cache.match('./index.html'));
+  if (cached) return cached;
+  const response = await fetch(request, NET);
+  return cacheAndReturn(request, response);
+}
+
+// Background refresh for the page (bypasses the browser HTTP cache).
+function revalidatePage(request) {
+  return fetch(request, NET)
+    .then((response) => cacheAndReturn(request, response))
+    .catch(() => null);
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -75,19 +92,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    // The page itself stays network-first: it is small, and a fresh copy is what
-    // makes a new release get picked up on the very next launch. Only the heavy
-    // assets below are served from cache. If the network is down (airplane mode)
-    // we fall back to the cached shell so the app still opens.
-    event.respondWith(
-      fetch(request, NET)
-        .then((response) => cacheAndReturn(request, response))
-        .catch(async () => {
-          const cache = await caches.open(CACHE_NAME);
-          return (await cache.match(request, { ignoreSearch: true }))
-            || (await cache.match('./index.html'));
-        })
-    );
+    // Answer from cache immediately (instant first paint — this is what made the
+    // original build feel fast), then refresh in the background so the next open
+    // is current. The refresh uses cache:'no-store' so the browser HTTP cache
+    // can never mask a new release.
+    event.respondWith(serveNavigation(request));
+    event.waitUntil(revalidatePage(request));
     return;
   }
 
