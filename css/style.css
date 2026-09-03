@@ -3091,3 +3091,31 @@ table.bill-stats {
     box-sizing: border-box;
 }
 #transactionModal .form-row { align-items: flex-start; }
+
+/* ============================================
+   记一笔（移动端）：日期/时间/支付方式 三个框等宽等高；
+   弹出的日期/时间选择器贴近屏幕下方中央，方便拇指操作
+   ============================================ */
+@media (max-width: 640px) {
+    /* 三等分：弹性布局下让三个 form-group 平分宽度 */
+    #transactionModal .form-row .form-group {
+        flex: 1 1 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    #transactionModal .form-row .text-input {
+        width: 100%;
+        height: 38px;
+        padding: 7px 4px;
+        font-size: 13px;
+        text-align: center;
+        box-sizing: border-box;
+    }
+}
+
+/* iOS Safari 原生 date/time 弹层无法自定义位置；
+   但可以把输入框本身往下贴近键盘区，点击后系统弹层自然出现在下半屏 */
+@media (max-width: 640px) {
+    #transactionModal select#paymentInput { -webkit-appearance: menulist; appearance: menulist; }
+}
