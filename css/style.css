@@ -3079,3 +3079,15 @@ table.bill-stats {
         margin-bottom: 6px;
     }
 }
+
+/* ============================================
+   记一笔：日期 / 时间 / 支付方式 / 备注 四个框统一高度
+   （原生 date/time 控件与 select 默认高度不一致）
+   ============================================ */
+#transactionModal .form-row .text-input,
+#transactionModal #noteInput {
+    height: 38px;
+    line-height: normal;
+    box-sizing: border-box;
+}
+#transactionModal .form-row { align-items: flex-start; }
