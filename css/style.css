@@ -3052,3 +3052,30 @@ table.bill-stats {
 .bill-stats tr.bs-avg td.bs-label { color: var(--accent); }
 .bs-num.income { color: var(--income); }
 .bs-num.expense { color: var(--expense); }
+
+/* ============================================
+   记一笔（移动端）：底部「日期/时间/支付/备注 + 数字键盘」
+   固定为一个整体，不随分类多少上下移动
+   ============================================ */
+@media (max-width: 640px) {
+    #transactionModal .modal-body { overflow: hidden; }
+
+    /* 所有模块固定高度，只有分类区伸缩 */
+    #transactionModal .modal-body > * { flex-shrink: 0; }
+
+    /* 分类区吃掉中间所有剩余空间，自身滚动 */
+    #transactionModal .form-group-cats {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        margin-bottom: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* 底部整体感：细线分隔 + 统一底色 */
+    #transactionModal .form-row {
+        border-top: 0.5px solid var(--divider);
+        padding-top: 8px;
+        margin-bottom: 6px;
+    }
+}
