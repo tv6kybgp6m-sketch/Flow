@@ -16,6 +16,11 @@ HTML + CSS + JavaScript + Chart.js + SheetJS
 
 ## 更新日志
 
+### v1.9.0
+
+- 「记一笔」弹窗：日期/时间/支付方式三个框统一为 44px 等高（与支付方式框一致），支付方式改用 `appearance:none` + 自绘下拉箭头（去掉 iOS 原生 menulist 外观，它会让 select 比输入框高）
+- 三个框等宽（Grid 三等分）等高，边框/圆角/背景统一
+
 ### v1.8.9
 
 - 修复 iOS Safari 上「记一笔」日期/时间/支付方式三个框宽高不一致：改用 CSS Grid `minmax(0,1fr)` 强制三等分（原生 date/time 控件有最小内容宽度，flex 分不匀）
