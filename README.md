@@ -16,6 +16,12 @@ HTML + CSS + JavaScript + Chart.js + SheetJS
 
 ## 更新日志
 
+### v1.8.9
+
+- 修复 iOS Safari 上「记一笔」日期/时间/支付方式三个框宽高不一致：改用 CSS Grid `minmax(0,1fr)` 强制三等分（原生 date/time 控件有最小内容宽度，flex 分不匀）
+- 修复 iOS Safari 上交易记录页悬浮「+」跑到顶部居中：把按钮移出带 `overflow:hidden` 的窗口容器，改为 `<body>` 直接子元素，并用 `left:50% + translateX(-50%)` 定位
+- 悬浮按钮的显示切换类从 `.mac-window` 移到 `body`（只在交易记录页显示）
+
 ### v1.8.8
 
 - 移动端「记一笔」：日期 / 时间 / 支付方式 三个框改为**等宽等高**（三等分整行宽度，统一 38px 高），日期时间居中显示

@@ -482,7 +482,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.8.8</div>
+                                    <div class="about-version">版本 1.8.9</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -681,12 +681,6 @@
             </div>
         </div>
 
-        <!-- Mobile floating "记一笔" button; only shown on the transactions view
-             via .mac-window.show-txn-fab (removed from reports / balance / budget / settings) -->
-        <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
-            <i class="fa-solid fa-plus"></i>
-        </button>
-
         <!-- Balance Entry Modal -->
         <div class="modal-overlay hidden" id="balanceModal">
             <div class="modal balance-modal">
@@ -767,6 +761,13 @@
         <div class="toast-container" id="toastContainer"></div>
     </div>
 
+    <!-- Mobile floating “记一笔” button. Direct child of <body> so its fixed
+         position never depends on the window's overflow (WebKit quirk), and it
+         only shows on the transactions view via body.show-txn-fab -->
+    <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
+        <i class="fa-solid fa-plus"></i>
+    </button>
+
     <script src="js/app.js"></script>
     <script>
         // Register Service Worker for PWA offline support.
@@ -774,7 +775,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.8.8').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.8.9').catch(() => {});
             });
         }
     </script>

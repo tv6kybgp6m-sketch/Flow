@@ -2311,7 +2311,7 @@ body.cat-dragging {
         cursor: pointer;
         transition: transform 0.15s ease;
     }
-    .fab-add:active { transform: scale(0.9); }
+    .fab-add:active { transform: translateX(-50%) scale(0.9); }
     /* Active nav item - top indicator bar + accent color */
     .nav-item.active {
         background: none;
@@ -2825,7 +2825,7 @@ body.cat-dragging {
 
 
 @media (max-width: 640px) {
-    .mac-window:not(.show-txn-fab) .fab-add { display: none; }
+    body:not(.show-txn-fab) .fab-add { display: none; }
     .view-header .secondary-btn { font-size: 12px; padding: 6px 10px; }
     .account-new { grid-template-columns: 1fr 1fr; }
     .account-new .primary-btn { grid-column: span 2; justify-content: center; }
@@ -3097,15 +3097,17 @@ table.bill-stats {
    弹出的日期/时间选择器贴近屏幕下方中央，方便拇指操作
    ============================================ */
 @media (max-width: 640px) {
-    /* 三等分：弹性布局下让三个 form-group 平分宽度 */
-    #transactionModal .form-row .form-group {
-        flex: 1 1 0;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
+    /* grid 的 1fr 强制三等分，不受原生 date/time 控件内容宽度影响 */
+    #transactionModal .form-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        align-items: stretch;
     }
+    #transactionModal .form-row .form-group { min-width: 0; margin-bottom: 0; }
     #transactionModal .form-row .text-input {
         width: 100%;
+        min-width: 0;
         height: 38px;
         padding: 7px 4px;
         font-size: 13px;
