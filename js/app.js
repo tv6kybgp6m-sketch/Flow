@@ -3290,16 +3290,23 @@ function renderBalanceStats() {
         body.innerHTML = '<tr><td colspan="4" class="bs-empty">该范围还没有余额记录</td></tr>';
         return;
     }
-    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
+    // 紧凑金额：去掉 ¥ 和千位分隔符，去掉多余的小数尾零，保证窄屏放得下
+    const bsMoney = (v, cls) => {
+        const sign = v < 0 ? '-' : '';
+        const abs = Math.abs(v);
+        let str = abs.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+        return `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${sign}${str}</span>`;
+    };
     body.innerHTML = months.slice().reverse().map(m => {
         const t = totalsFromMap(balancesAtMonth(m));
         const [y, mm] = m.split('-');
+        const dateLabel = state.balancePeriod === 'year' ? `${Number(mm)}月` : `${y}.${Number(mm)}`;
         return `
         <tr class="bs-row" onclick="openAccountHistoryForPeriod('${m}', '${y}年${Number(mm)}月')">
-            <td class="bs-label">${state.balancePeriod === 'year' ? `${Number(mm)}月` : `${y}年${Number(mm)}月`}</td>
-            <td>${money(t.asset, 'income')}</td>
-            <td>${money(t.liability, 'expense')}</td>
-            <td>${money(t.net)}</td>
+            <td class="bs-label">${dateLabel}</td>
+            <td>${bsMoney(t.asset, 'income')}</td>
+            <td>${bsMoney(t.liability, 'expense')}</td>
+            <td>${bsMoney(t.net)}</td>
         </tr>`;
     }).join('');
 }

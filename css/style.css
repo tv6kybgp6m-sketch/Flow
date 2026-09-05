@@ -3134,3 +3134,19 @@ table.bill-stats {
 }
 
 
+
+
+/* ============================================
+   账单统计（移动端）：紧凑排版，保证四列完整显示
+   月份 2026.9；金额去 ¥ 去千位分隔符
+   ============================================ */
+@media (max-width: 640px) {
+    .bill-stats { width: 100%; table-layout: auto; }
+    .bill-stats th { font-size: 10px; padding: 5px 2px; }
+    .bill-stats td { font-size: 11px; padding: 6px 2px; white-space: nowrap; }
+    .bill-stats td.bs-label { font-size: 11px; padding-right: 4px; }
+    .bill-stats td:not(.bs-label) { text-align: right; }
+    .bill-stats th:not(:first-child) { text-align: right; }
+    .bs-num { font-variant-numeric: tabular-nums; }
+    .bill-stats-wrap { overflow-x: auto; }
+}
