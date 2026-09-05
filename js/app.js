@@ -154,6 +154,7 @@ let state = {
     reportMonth: null,
     deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
+    lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -172,7 +173,21 @@ let charts = {};
 // ---- Storage ----
 const STORAGE_KEY = 'bookkeeping_app_data';
 
+// 节流写入：连续改动只在约 400ms 内落盘一次，避免每记一笔都把整本账重新序列化。
+// 关页面 / 切后台时强制补写，保证不丢。
+let __saveTimer = null;
+
 function saveState() {
+    if (__saveTimer) return;                       // 已排队，等这次窗口结束统一写
+    __saveTimer = setTimeout(() => { __saveTimer = null; saveStateNow(); }, 400);
+}
+
+function flushState() {
+    if (__saveTimer) { clearTimeout(__saveTimer); __saveTimer = null; }
+    saveStateNow();
+}
+
+function saveStateNow() {
     const data = {
         transactions: state.transactions,
         categories: state.categories,
@@ -184,6 +199,7 @@ function saveState() {
         categoryVersion: state.categoryVersion || 2,
         deleted: state.deleted,
         pmAddedAt: state.pmAddedAt,
+        lastExportAt: state.lastExportAt,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
@@ -517,6 +533,7 @@ function exportToICloud() {
     URL.revokeObjectURL(url);
     iCloudLastSyncTime = Date.now();
     updateICloudSyncUI();
+    markExported();
     showToast('已导出同步文件，请保存到 iCloud Drive', 'success');
 }
 
@@ -638,6 +655,7 @@ function loadState() {
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
+            state.lastExportAt = Number(data.lastExportAt) || 0;
             // 仪表盘页面已移除：旧设置迁移到交易记录
             if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
 
@@ -670,7 +688,7 @@ function formatCurrency(amount) {
 }
 
 function formatDate(dateStr) {
-    const d = new Date(dateStr);
+    const d = parseLocalDate(dateStr);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today);
@@ -702,7 +720,7 @@ function formatDateShort(dateStr) {
 }
 
 function formatDateFull(dateStr) {
-    const d = new Date(dateStr);
+    const d = parseLocalDate(dateStr);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -1032,7 +1050,7 @@ function renderTransactions() {
     }
 
     // Sort by date desc
-    filtered.sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt);
+    filtered.sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || b.createdAt - a.createdAt);
 
     const container = document.getElementById('allTransactions');
     const empty = document.getElementById('emptyTransactions');
@@ -1523,7 +1541,7 @@ function renderReportSelectors() {
     const now = new Date();
 
     // Collect all years from transactions + current year
-    const years = [...new Set(state.transactions.map(t => new Date(t.date).getFullYear()))];
+    const years = [...new Set(state.transactions.map(t => parseLocalDate(t.date).getFullYear()))];
     years.push(now.getFullYear());
     const uniqueYears = [...new Set(years)].sort((a, b) => b - a);
 
@@ -2286,7 +2304,7 @@ function openLedger({ title, subtitle, ids, txns, bucket = null, ignoreMetric = 
 function renderCategoryLedger() {
     const list = document.getElementById('catTxnList');
     const empty = document.getElementById('catTxnEmpty');
-    const sorted = [...catLedgerTxns].sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt);
+    const sorted = [...catLedgerTxns].sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || b.createdAt - a.createdAt);
     const income = sorted.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const expense = sorted.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     const summary = document.getElementById('catTxnSummary');
@@ -2831,6 +2849,31 @@ function initCategoryInteractions() {
 }
 
 // ---- Settings ----
+// 备份提醒：超过 30 天没导出过就在设置页顶部提示；数据为空时不打扰
+const BACKUP_REMIND_DAYS = 30;
+
+function markExported() {
+    state.lastExportAt = Date.now();
+    saveState();
+    renderBackupBanner();
+}
+
+function renderBackupBanner() {
+    const banner = document.getElementById('backupBanner');
+    if (!banner) return;
+    const hasData = state.transactions.length > 0 || state.balances.length > 0;
+    if (!hasData) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
+    const days = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / 86400000) : null;
+    if (days !== null && days < BACKUP_REMIND_DAYS) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
+    banner.classList.remove('hidden');
+    banner.innerHTML = `
+        <div class="bb-text">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>${days === null ? '你还没有导出过备份' : `已经 ${days} 天没有备份了`}。数据只存在这台设备的浏览器里，清缓存或换设备会丢失，建议定期导出一份。</span>
+        </div>
+        <button class="secondary-btn" onclick="document.getElementById('dataMgmtSection').scrollIntoView({behavior:'smooth'})"><i class="fa-solid fa-download"></i> 去备份</button>`;
+}
+
 function renderSettings() {
     document.getElementById('currencySelect').value = state.settings.currency;
     document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -2841,6 +2884,7 @@ function renderSettings() {
     const autoToggle = document.getElementById('autoOpenAddToggle');
     if (autoToggle) autoToggle.checked = !!state.settings.autoOpenAdd;
     updateICloudSyncUI();
+    renderBackupBanner();
 }
 
 function applyTheme(theme) {
@@ -2927,6 +2971,7 @@ function exportData() {
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 500);
 
+        markExported();
         showToast('数据已导出为 Excel (.xlsx)', 'success');
     } catch (err) {
         console.error('Export error:', err);
@@ -4099,6 +4144,12 @@ function init() {
     initEventListeners();
     initCategoryInteractions();
     switchView(state.settings.defaultView || 'transactions');
+
+    // 关页面 / 切到后台时把待写入的数据立刻落盘
+    window.addEventListener('pagehide', () => { if (__saveTimer) flushState(); });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && __saveTimer) flushState();
+    });
 
     // Auto-load sample data on first visit
     if (state.transactions.length === 0 && !localStorage.getItem(STORAGE_KEY + '_visited')) {
