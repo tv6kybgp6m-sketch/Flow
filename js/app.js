@@ -660,11 +660,13 @@ function loadState() {
 }
 
 // ---- Utils ----
+// 全站统一金额格式：不带货币符号、不带千位分隔符、去掉多余小数尾零
+// （例：2850000.55 -> "2850000.55"，-31.10 -> "-31.1"，400 -> "400"）
 function formatCurrency(amount) {
-    const sym = state.settings.currency || '¥';
     const sign = amount < 0 ? '-' : '';
     const abs = Math.abs(amount);
-    return sign + sym + abs.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const str = abs.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+    return sign + str;
 }
 
 function formatDate(dateStr) {
