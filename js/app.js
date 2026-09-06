@@ -87,22 +87,22 @@ const CATEGORY_MIGRATION_V2 = {
 
 // 资产负债：预设账户（kind 决定计入资产还是负债，group 用于分组统计）
 const DEFAULT_ACCOUNTS = [
-    { id: 'a_cash',       name: '现金',      kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759' , bucket: 'cash'},
-    { id: 'a_debit',      name: '储蓄卡',    kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#5ac8fa' , bucket: 'cash'},
-    { id: 'a_fixed',      name: '定期存款',  kind: 'asset',     group: '储蓄存款', icon: 'fa-vault',                color: '#007aff' , bucket: 'steady'},
-    { id: 'a_mmf',        name: '货币基金',  kind: 'asset',     group: '投资理财', icon: 'fa-coins',                color: '#ffcc00' , bucket: 'cash'},
-    { id: 'a_stock',      name: '股票基金',  kind: 'asset',     group: '投资理财', icon: 'fa-arrow-trend-up',       color: '#ff9500' , bucket: 'growth'},
-    { id: 'a_wealth',     name: '理财产品',  kind: 'asset',     group: '投资理财', icon: 'fa-certificate',          color: '#af52de' , bucket: 'steady'},
-    { id: 'a_fund',       name: '公积金',    kind: 'asset',     group: '其他资产', icon: 'fa-house-chimney',        color: '#30b0c7' , bucket: 'growth'},
-    { id: 'a_house',      name: '房产',      kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e' , bucket: 'growth'},
-    { id: 'a_car',        name: '车辆',      kind: 'asset',     group: '固定资产', icon: 'fa-car-side',             color: '#636e72' , bucket: 'growth'},
-    { id: 'a_receivable', name: '应收借款',  kind: 'asset',     group: '其他资产', icon: 'fa-hand-holding-dollar',  color: '#ff2d55' , bucket: 'cash'},
-    { id: 'l_credit',     name: '信用卡',    kind: 'liability', group: '消费负债', icon: 'fa-credit-card',          color: '#ff3b30' },
-    { id: 'l_install',    name: '花呗/白条', kind: 'liability', group: '消费负债', icon: 'fa-mobile-screen-button', color: '#ff9500' },
-    { id: 'l_mortgage',   name: '房贷',      kind: 'liability', group: '大额负债', icon: 'fa-house-circle-check',   color: '#5856d6' },
-    { id: 'l_carloan',    name: '车贷',      kind: 'liability', group: '大额负债', icon: 'fa-car-burst',            color: '#f7475a' },
-    { id: 'l_personal',   name: '私人借款',  kind: 'liability', group: '其他负债', icon: 'fa-handshake',            color: '#8e8e93' },
-    { id: 'l_other',      name: '其他负债',  kind: 'liability', group: '其他负债', icon: 'fa-ellipsis',             color: '#aeaeb2' },
+    { id: 'a_cash',       name: '现金',      kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759' , bucket: 'cash', owner: '本人' },
+    { id: 'a_debit',      name: '储蓄卡',    kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#5ac8fa' , bucket: 'cash', owner: '本人' },
+    { id: 'a_fixed',      name: '定期存款',  kind: 'asset',     group: '储蓄存款', icon: 'fa-vault',                color: '#007aff' , bucket: 'steady', owner: '本人' },
+    { id: 'a_mmf',        name: '货币基金',  kind: 'asset',     group: '投资理财', icon: 'fa-coins',                color: '#ffcc00' , bucket: 'cash', owner: '本人' },
+    { id: 'a_stock',      name: '股票基金',  kind: 'asset',     group: '投资理财', icon: 'fa-arrow-trend-up',       color: '#ff9500' , bucket: 'growth', owner: '本人' },
+    { id: 'a_wealth',     name: '理财产品',  kind: 'asset',     group: '投资理财', icon: 'fa-certificate',          color: '#af52de' , bucket: 'steady', owner: '本人' },
+    { id: 'a_fund',       name: '公积金',    kind: 'asset',     group: '其他资产', icon: 'fa-house-chimney',        color: '#30b0c7' , bucket: 'growth', owner: '本人' },
+    { id: 'a_house',      name: '房产',      kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e' , bucket: 'growth', owner: '本人' },
+    { id: 'a_car',        name: '车辆',      kind: 'asset',     group: '固定资产', icon: 'fa-car-side',             color: '#636e72' , bucket: 'growth', owner: '本人' },
+    { id: 'a_receivable', name: '应收借款',  kind: 'asset',     group: '其他资产', icon: 'fa-hand-holding-dollar',  color: '#ff2d55' , bucket: 'cash', owner: '本人' },
+    { id: 'l_credit',     name: '信用卡',    kind: 'liability', group: '消费负债', icon: 'fa-credit-card',          color: '#ff3b30' , owner: '本人' },
+    { id: 'l_install',    name: '花呗/白条', kind: 'liability', group: '消费负债', icon: 'fa-mobile-screen-button', color: '#ff9500' , owner: '本人' },
+    { id: 'l_mortgage',   name: '房贷',      kind: 'liability', group: '大额负债', icon: 'fa-house-circle-check',   color: '#5856d6' , owner: '本人' },
+    { id: 'l_carloan',    name: '车贷',      kind: 'liability', group: '大额负债', icon: 'fa-car-burst',            color: '#f7475a' , owner: '本人' },
+    { id: 'l_personal',   name: '私人借款',  kind: 'liability', group: '其他负债', icon: 'fa-handshake',            color: '#8e8e93' , owner: '本人' },
+    { id: 'l_other',      name: '其他负债',  kind: 'liability', group: '其他负债', icon: 'fa-ellipsis',             color: '#aeaeb2' , owner: '本人' },
 ];
 
 // 四笔钱：三个资产桶 + 保险保障清单
@@ -167,6 +167,8 @@ let state = {
     fundTargets: { cash: 0, steady: 0, growth: 0 },
     insuranceMembers: [...DEFAULT_INSURANCE_MEMBERS],
     insurancePolicies: [],   // {id, type, member, covered, amount, premium, createdAt, updatedAt}
+    balanceMembers: ['本人'],   // 家庭资产负债表的成员名单
+    balanceOwner: 'all',       // 当前筛选：'all' 或某成员
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -210,6 +212,7 @@ function saveStateNow() {
         fundTargets: state.fundTargets,
         insuranceMembers: state.insuranceMembers,
         insurancePolicies: state.insurancePolicies,
+        balanceMembers: state.balanceMembers,
         settings: state.settings,
         categoryVersion: state.categoryVersion || 2,
         deleted: state.deleted,
@@ -692,6 +695,7 @@ function loadState() {
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
             state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
             state.insurancePolicies = Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [];
+            state.balanceMembers = Array.isArray(data.balanceMembers) && data.balanceMembers.length ? data.balanceMembers : ['本人'];
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
@@ -3251,6 +3255,13 @@ const BAL_METRICS = {
 let balanceRenderToken = 0;
 
 function accountById(id) { return state.accounts.find(a => a.id === id); }
+
+// 资产负债页当前可见账户（按成员筛选）；四笔钱等家庭总账视图仍用 state.accounts
+function balAccounts() {
+    return state.balanceOwner === 'all'
+        ? state.accounts
+        : state.accounts.filter(a => a.owner === state.balanceOwner);
+}
 function balanceMonths() { return [...new Set(state.balances.map(b => b.month))].sort(); }
 function balanceYears() { return [...new Set(balanceMonths().map(m => m.slice(0, 4)))].sort(); }
 
@@ -3269,7 +3280,7 @@ function monthHasRecords(month) {
 // 仅用于「沿用上期」按钮的预填，属于用户主动操作，不参与统计
 function carriedBalances(month) {
     const map = {};
-    state.accounts.forEach(a => {
+    balAccounts().forEach(a => {
         const hist = state.balances
             .filter(b => b.accountId === a.id && b.month <= month)
             .sort((x, y) => x.month.localeCompare(y.month));
@@ -3280,7 +3291,7 @@ function carriedBalances(month) {
 
 function totalsFromMap(map) {
     let asset = 0, liability = 0;
-    state.accounts.forEach(a => {
+    balAccounts().forEach(a => {
         const v = map[a.id];
         if (v === undefined || v === null) return;
         if (a.kind === 'asset') asset += v; else liability += v;
@@ -3448,6 +3459,8 @@ function renderBalance() {
     renderBalanceChart();
     renderBalanceBreakdown();
     renderBalanceStats();
+    renderBalanceMemberBar();
+    renderFamilySummary();
 }
 
 function balanceTrendMonths() {
@@ -3584,7 +3597,7 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
 function balancePieEntries(info, metric) {
     const map = balancesAtMonth(info.month);
     const rows = [];
-    state.accounts.forEach(a => {
+    balAccounts().forEach(a => {
         const v = map[a.id];
         if (v === undefined || v === null || v === 0) return;
         if (metric === 'asset' && a.kind !== 'asset') return;
@@ -3654,7 +3667,7 @@ function renderBalanceBreakdown() {
     document.getElementById('balBreakdownTitle').textContent = `${meta.name}账户明细`;
 
     // 列出该维度下的全部账户；当月没记过的显示「—」，不补数也不累加
-    const accounts = state.accounts.filter(a =>
+    const accounts = balAccounts().filter(a =>
         metric === 'net' ? true : a.kind === (metric === 'asset' ? 'asset' : 'liability'));
     if (!accounts.length) {
         container.innerHTML = '<div class="breakdown-empty">还没有账户，点右上角「账户」添加</div>';
@@ -3731,7 +3744,7 @@ function openAccountHistoryForPeriod(month, label) {
     document.getElementById('acctHistSub').textContent = `${month.replace('-', '年')}月余额`;
     const del = document.getElementById('acctHistDelete');
     del.style.display = 'none';
-    const rows = state.accounts.filter(a => map[a.id] !== undefined).sort((x, y) => map[y.id] - map[x.id]);
+    const rows = balAccounts().filter(a => map[a.id] !== undefined).sort((x, y) => map[y.id] - map[x.id]);
     document.getElementById('acctHistSummary').innerHTML = `
         <span class="cat-txn-summary-item income">资产 <b>${formatCurrency(t.asset)}</b></span>
         <span class="cat-txn-summary-item expense">负债 <b>${formatCurrency(t.liability)}</b></span>
@@ -3912,11 +3925,13 @@ function closeAccountsModal() { document.getElementById('accountsModal').classLi
 function renderAccountManageList() {
     const box = document.getElementById('accountManageList');
     if (!box) return;
-    const sections = [
-        ['asset', '资产账户'],
-        ['liability', '负债账户'],
-    ];
-    box.innerHTML = sections.map(([kind, label]) => {
+    const memberChips = state.balanceMembers.map(m =>
+        `<span class="fam-chip">${_esc(m)}<i class="fa-solid fa-pen" onclick="renameBalanceMember('${_esc(m)}')"></i><i class="fa-solid fa-xmark" onclick="deleteBalanceMember('${_esc(m)}')"></i></span>`).join('');
+    const sections = [['asset', '资产账户'], ['liability', '负债账户']];
+    box.innerHTML = `
+        <div class="account-section-title">家庭成员</div>
+        <div class="fam-chips">${memberChips}<button class="fam-add" onclick="addBalanceMember()"><i class="fa-solid fa-plus"></i> 添加</button></div>
+    ` + sections.map(([kind, label]) => {
         const rows = state.accounts.filter(a => a.kind === kind);
         return `
             <div class="account-section-title">${label}（${rows.length}）</div>
@@ -3924,6 +3939,10 @@ function renderAccountManageList() {
                 <div class="account-row">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
                     <div class="ar-name" onclick="renameAccount('${a.id}')">${a.name}<span class="be-kind ${a.kind}">${a.group}</span></div>
+                    <select class="owner-select" onchange="setAccountOwner('${a.id}', this.value)">
+                        ${state.balanceMembers.map(m => `<option value="${_esc(m)}" ${a.owner === m ? 'selected' : ''}>${_esc(m)}</option>`).join('')}
+                        ${state.balanceMembers.includes(a.owner) ? '' : `<option value="${_esc(a.owner || '')}" selected>${_esc(a.owner || '未归属')}</option>`}
+                    </select>
                     <button class="bh-delete" onclick="deleteAccountFromList('${a.id}')" title="删除"><i class="fa-solid fa-trash"></i></button>
                 </div>`).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
     }).join('');
@@ -4297,6 +4316,115 @@ function renderFundAccountPicker() {
 function initFundListeners() {
     const btn = document.getElementById('fundAccountsBtn');
     if (btn) btn.addEventListener('click', openFundAccounts);
+}
+
+// ==================== 家庭资产负债表：成员切换 + 汇总 + 归属 ====================
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function renderBalanceMemberBar() {
+    const bar = document.getElementById('balMemberBar');
+    if (!bar) return;
+    let html = `<button class="bm-chip ${state.balanceOwner === 'all' ? 'active' : ''}" onclick="setBalanceOwner('all')">全部</button>`;
+    html += state.balanceMembers.map(m =>
+        `<button class="bm-chip ${state.balanceOwner === m ? 'active' : ''}" onclick="setBalanceOwner('${_esc(m)}')">${_esc(m)}</button>`).join('');
+    html += `<button class="bm-chip bm-add" onclick="addBalanceMember()"><i class="fa-solid fa-user-plus"></i> 成员</button>`;
+    bar.innerHTML = html;
+}
+
+function setBalanceOwner(m) {
+    state.balanceOwner = m;
+    renderBalance();
+}
+
+function addBalanceMember() {
+    const name = prompt('新成员姓名');
+    if (!name || !name.trim()) return;
+    const n = name.trim();
+    if (state.balanceMembers.includes(n)) { showToast('已有该成员', 'error'); return; }
+    state.balanceMembers.push(n);
+    saveState();
+    renderBalance();
+}
+
+function renameBalanceMember(old) {
+    const name = prompt('修改成员姓名', old);
+    if (!name || !name.trim() || name.trim() === old) return;
+    const n = name.trim();
+    if (state.balanceMembers.includes(n)) { showToast('已有同名成员', 'error'); return; }
+    state.balanceMembers = state.balanceMembers.map(m => m === old ? n : m);
+    state.accounts.forEach(a => { if (a.owner === old) { a.owner = n; a.updatedAt = Date.now(); } });
+    if (state.balanceOwner === old) state.balanceOwner = n;
+    saveState();
+    renderBalance();
+    renderAccountManageList();
+}
+
+function deleteBalanceMember(name) {
+    if (state.balanceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
+    const count = state.accounts.filter(a => a.owner === name).length;
+    const fallback = state.balanceMembers.find(m => m !== name);
+    if (!confirm(`删除成员「${name}」？${count ? `他名下的 ${count} 个账户将改归「${fallback}」。` : ''}`)) return;
+    state.balanceMembers = state.balanceMembers.filter(m => m !== name);
+    state.accounts.forEach(a => { if (a.owner === name) { a.owner = fallback; a.updatedAt = Date.now(); } });
+    if (state.balanceOwner === name) state.balanceOwner = 'all';
+    saveState();
+    renderBalance();
+    renderAccountManageList();
+}
+
+function setAccountOwner(id, owner) {
+    const a = accountById(id);
+    if (!a) return;
+    a.owner = owner;
+    a.updatedAt = Date.now();
+    saveState();
+    renderBalance();
+}
+
+function renderFamilySummary() {
+    const body = document.getElementById('familySummaryBody');
+    if (!body) return;
+    const months = balanceMonths();
+    const month = months[months.length - 1] || null;
+    const map = month ? balancesAtMonth(month) : {};
+    const sub = document.getElementById('familySummarySubtitle');
+    if (sub) sub.textContent = month ? `截至 ${month.replace('-', '年')}月` : '';
+
+    const rows = state.balanceMembers.map(mem => {
+        let a = 0, l = 0;
+        state.accounts.forEach(acc => {
+            if (acc.owner !== mem) return;
+            const v = map[acc.id];
+            if (v === undefined) return;
+            if (acc.kind === 'asset') a += v; else l += v;
+        });
+        return { mem, a, l, net: a - l };
+    });
+    // 未归属（owner 不在成员名单里）
+    let ua = 0, ul = 0;
+    state.accounts.forEach(acc => {
+        if (state.balanceMembers.includes(acc.owner)) return;
+        const v = map[acc.id];
+        if (v === undefined) return;
+        if (acc.kind === 'asset') ua += v; else ul += v;
+    });
+    if (ua || ul) rows.push({ mem: '未归属', a: ua, l: ul, net: ua - ul });
+
+    const tA = rows.reduce((s, r) => s + r.a, 0), tL = rows.reduce((s, r) => s + r.l, 0);
+    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
+    body.innerHTML = rows.map(r => `
+        <tr>
+            <td class="bs-label">${_esc(r.mem)}</td>
+            <td>${money(r.a, 'income')}</td>
+            <td>${money(r.l, 'expense')}</td>
+            <td>${money(r.net)}</td>
+        </tr>`).join('') + `
+        <tr class="bs-total">
+            <td class="bs-label">家庭合计</td>
+            <td>${money(tA)}</td>
+            <td>${money(tL)}</td>
+            <td>${money(tA - tL)}</td>
+        </tr>`;
 }
 
 // ---- Event Listeners ----

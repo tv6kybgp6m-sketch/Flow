@@ -295,6 +295,7 @@
                             </button>
                         </div>
                     </div>
+                    <div class="bal-member-bar" id="balMemberBar"></div>
                     <div class="report-summary">
                         <div class="report-card clickable" data-bal-metric="asset" id="cardAsset">
                             <div class="report-card-top">
@@ -370,6 +371,22 @@
                                     <tr><th>日期</th><th>资产</th><th>负债</th><th>净资产</th></tr>
                                 </thead>
                                 <tbody id="balanceStatsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="chart-card" id="familySummaryCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>家庭成员汇总</h3>
+                                <span class="chart-subtitle" id="familySummarySubtitle"></span>
+                            </div>
+                        </div>
+                        <div class="bill-stats-wrap">
+                            <table class="bill-stats">
+                                <thead>
+                                    <tr><th>成员</th><th>资产</th><th>负债</th><th>净资产</th></tr>
+                                </thead>
+                                <tbody id="familySummaryBody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -522,7 +539,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.10.0</div>
+                                    <div class="about-version">版本 1.11.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -831,7 +848,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.10.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.11.0').catch(() => {});
             });
         }
     </script>

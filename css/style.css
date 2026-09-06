@@ -3306,3 +3306,39 @@ table.bill-stats {
     .ins-field { font-size: 9px; }
     .ins-type { font-size: 12px; }
 }
+
+/* ============================================
+   家庭资产负债表：成员切换 + 归属
+   ============================================ */
+.bal-member-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.bm-chip {
+    border: 1px solid var(--border-strong); background: var(--bg-card);
+    color: var(--text-secondary); border-radius: 16px; padding: 5px 14px;
+    font-size: 13px; cursor: pointer; font-family: var(--font);
+}
+.bm-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.bm-chip.bm-add { border-style: dashed; }
+
+.fam-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.fam-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg-content); border: 1px solid var(--border);
+    border-radius: 14px; padding: 4px 10px; font-size: 12px; color: var(--text-primary);
+}
+.fam-chip i { font-size: 10px; color: var(--text-tertiary); cursor: pointer; }
+.fam-chip i:hover { color: var(--accent); }
+.fam-chip i.fa-xmark:hover { color: var(--expense); }
+.fam-add {
+    border: 1px dashed var(--border-strong); background: none; color: var(--accent);
+    border-radius: 14px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: var(--font);
+}
+.owner-select {
+    padding: 5px 6px; font-size: 12px; border: 1px solid var(--border-strong);
+    border-radius: 6px; background: var(--bg-input); color: var(--text-primary); flex-shrink: 0;
+}
+.account-row .ar-name { flex: 1; }
+
+@media (max-width: 640px) {
+    .bm-chip { font-size: 12px; padding: 4px 12px; }
+    .owner-select { font-size: 12px; padding: 4px 5px; }
+}
