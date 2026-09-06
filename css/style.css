@@ -2807,6 +2807,17 @@ body.cat-dragging {
     font-size: 13px;
 }
 .bh-month { color: var(--text-secondary); flex: 1; }
+.bh-member {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--accent-light);
+    border-radius: 10px;
+    vertical-align: middle;
+}
 .bh-amount { font-weight: 600; color: var(--text-primary); }
 .bh-delete {
     border: none;
@@ -3332,9 +3343,9 @@ table.bill-stats {
     border: 1px dashed var(--border-strong); background: none; color: var(--accent);
     border-radius: 14px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: var(--font);
 }
-.owner-select {
-    padding: 5px 6px; font-size: 12px; border: 1px solid var(--border-strong);
-    border-radius: 6px; background: var(--bg-input); color: var(--text-primary); flex-shrink: 0;
+.account-hint {
+    font-size: 12px; line-height: 1.5; color: var(--text-tertiary);
+    background: var(--bg-card-hover); border-radius: 8px; padding: 7px 10px; margin-bottom: 4px;
 }
 .account-row .ar-name { flex: 1; }
 
