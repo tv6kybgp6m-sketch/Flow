@@ -51,6 +51,10 @@
                         <i class="fa-solid fa-scale-balanced"></i>
                         <span>资产负债</span>
                     </a>
+                    <a class="nav-item" data-view="funds">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>四笔钱</span>
+                    </a>
                     <a class="nav-item" data-view="budget">
                         <i class="fa-solid fa-wallet"></i>
                         <span>预算管理</span>
@@ -229,6 +233,41 @@
                                 <tbody id="billStatsBody"></tbody>
                             </table>
                         </div>
+                    </div>
+                </section>
+
+                <!-- Four Funds View -->
+                <section class="view" id="view-funds">
+                    <div class="view-header">
+                        <h1>四笔钱</h1>
+                        <div class="report-controls">
+                            <button class="secondary-btn" id="fundAccountsBtn">
+                                <i class="fa-solid fa-tags"></i> 账户归类
+                            </button>
+                        </div>
+                    </div>
+                    <div class="fund-quadrant" id="fundQuadrant"></div>
+                    <div class="fund-cards" id="fundCards"></div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap"><h3>资产配比</h3></div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="fundDonut"></canvas>
+                        </div>
+                        <div class="drill-chart-empty hidden" id="fundDonutEmpty">还没有余额数据，先去「资产负债」记一期余额</div>
+                    </div>
+                    <div class="fund-debt-row" id="fundDebtRow"></div>
+                    <div class="fund-unassigned-row hidden" id="fundUnassignedRow"></div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>保险保障</h3>
+                                <span class="chart-subtitle">配置即打勾 · 可分家庭成员</span>
+                            </div>
+                        </div>
+                        <div class="ins-members" id="insMembers"></div>
+                        <div class="ins-list" id="insList"></div>
                     </div>
                 </section>
 
@@ -483,7 +522,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.9.3</div>
+                                    <div class="about-version">版本 1.10.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -758,6 +797,22 @@
             </div>
         </div>
 
+        <!-- Fund Account Assignment Modal -->
+        <div class="modal-overlay hidden" id="fundAccountsModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>账户归类</h2>
+                        <div class="cat-txn-sub">把每个资产账户归入某一笔钱</div>
+                    </div>
+                    <button class="modal-close" onclick="closeFundAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div id="fundAccountList"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Toast -->
         <div class="toast-container" id="toastContainer"></div>
     </div>
@@ -776,7 +831,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.9.3').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.10.0').catch(() => {});
             });
         }
     </script>

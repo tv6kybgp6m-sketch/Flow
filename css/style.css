@@ -3174,3 +3174,135 @@ table.bill-stats {
     .backup-banner { flex-direction: column; align-items: stretch; }
     .backup-banner .secondary-btn { justify-content: center; }
 }
+
+/* ============================================
+   四笔钱
+   ============================================ */
+/* 顶部 2×2 象限 */
+.fund-quadrant {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.fq-cell {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px;
+    min-height: 84px;
+    box-shadow: var(--shadow-sm);
+}
+.fq-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: color-mix(in srgb, var(--fq-color) 16%, transparent);
+    z-index: 0;
+    transition: width 0.5s ease;
+}
+.fq-cell > *:not(.fq-fill) { position: relative; z-index: 1; }
+.fq-name { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+.fq-name i { color: var(--fq-color); margin-right: 4px; }
+.fq-act { font-size: 19px; font-weight: 700; color: var(--fq-color); margin: 4px 0 2px; }
+.fq-meta { font-size: 11px; color: var(--text-tertiary); }
+
+/* 三张资产桶卡片 */
+.fund-cards { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+.fund-card {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 14px;
+}
+.fc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.fc-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.fc-title i { margin-right: 6px; }
+.fc-hint { font-size: 11px; color: var(--text-tertiary); }
+.fc-nums { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+.fc-act { font-size: 22px; font-weight: 700; }
+.fc-share { font-size: 12px; color: var(--text-secondary); }
+.fc-bar { height: 6px; background: var(--divider); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+.fc-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.fc-target { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
+.fc-cur { color: var(--text-tertiary); }
+.fc-amt, .fc-pct {
+    width: 88px; padding: 5px 8px; font-size: 13px;
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--bg-input); color: var(--text-primary);
+}
+.fc-pct { width: 52px; }
+.fc-pctsep { color: var(--text-tertiary); }
+.fc-gap { font-size: 11px; margin-top: 6px; }
+.fc-gap.under { color: var(--warning); }
+.fc-gap.ok { color: var(--income); }
+
+/* 负债 / 未分配 */
+.fund-debt-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--bg-card); border-radius: var(--radius-md);
+    padding: 10px 14px; margin-bottom: 10px; box-shadow: var(--shadow-sm);
+    font-size: 13px;
+}
+.fd-label { color: var(--text-secondary); }
+.fd-label i { color: var(--expense); margin-right: 6px; }
+.fd-val { color: var(--text-primary); font-weight: 600; }
+.fund-unassigned-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--warning-light); border-radius: var(--radius-md);
+    padding: 10px 14px; margin-bottom: 10px; font-size: 12px;
+}
+.fund-unassigned-row.hidden { display: none; }
+.fu-text { color: var(--text-primary); }
+.fu-text i { color: var(--warning); margin-right: 6px; }
+
+/* 保险清单 */
+.ins-members { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.ins-member {
+    border: 1px solid var(--border-strong); background: var(--bg-content);
+    color: var(--text-secondary); border-radius: 16px; padding: 5px 12px;
+    font-size: 12px; cursor: pointer; font-family: var(--font);
+}
+.ins-member.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ins-member.ins-add { border-style: dashed; }
+.ins-list { display: flex; flex-direction: column; }
+.ins-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 2px; border-bottom: 0.5px solid var(--divider);
+}
+.ins-row:last-child { border-bottom: none; }
+.ins-check { position: relative; display: inline-flex; flex-shrink: 0; }
+.ins-check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ins-box {
+    width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--border-strong);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px;
+    cursor: pointer; transition: all var(--transition);
+}
+.ins-box i { opacity: 0; }
+.ins-check input:checked + .ins-box { background: #af52de; border-color: #af52de; }
+.ins-check input:checked + .ins-box i { opacity: 1; }
+.ins-type { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.ins-field { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-tertiary); }
+.ins-field em { font-style: normal; }
+.ins-amt, .ins-prem {
+    width: 72px; padding: 4px 6px; font-size: 12px;
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--bg-input); color: var(--text-primary);
+}
+.ins-row:not(.on) .ins-amt, .ins-row:not(.on) .ins-prem { opacity: 0.5; }
+
+/* 账户归类弹窗 */
+.facct-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px; border-bottom: 0.5px solid var(--divider); }
+.facct-name { font-size: 13px; color: var(--text-primary); }
+.facct-name i { margin-right: 8px; }
+.facct-select { padding: 6px 8px; font-size: 13px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); }
+
+@media (max-width: 640px) {
+    .fund-quadrant { gap: 8px; }
+    .fq-cell { padding: 10px 12px; min-height: 76px; }
+    .fq-act { font-size: 17px; }
+    .fc-amt { width: 80px; }
+    .ins-amt, .ins-prem { width: 62px; }
+    .ins-field { font-size: 9px; }
+    .ins-type { font-size: 12px; }
+}

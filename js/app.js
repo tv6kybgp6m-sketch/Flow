@@ -87,16 +87,16 @@ const CATEGORY_MIGRATION_V2 = {
 
 // 资产负债：预设账户（kind 决定计入资产还是负债，group 用于分组统计）
 const DEFAULT_ACCOUNTS = [
-    { id: 'a_cash',       name: '现金',      kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759' },
-    { id: 'a_debit',      name: '储蓄卡',    kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#5ac8fa' },
-    { id: 'a_fixed',      name: '定期存款',  kind: 'asset',     group: '储蓄存款', icon: 'fa-vault',                color: '#007aff' },
-    { id: 'a_mmf',        name: '货币基金',  kind: 'asset',     group: '投资理财', icon: 'fa-coins',                color: '#ffcc00' },
-    { id: 'a_stock',      name: '股票基金',  kind: 'asset',     group: '投资理财', icon: 'fa-arrow-trend-up',       color: '#ff9500' },
-    { id: 'a_wealth',     name: '理财产品',  kind: 'asset',     group: '投资理财', icon: 'fa-certificate',          color: '#af52de' },
-    { id: 'a_fund',       name: '公积金',    kind: 'asset',     group: '其他资产', icon: 'fa-house-chimney',        color: '#30b0c7' },
-    { id: 'a_house',      name: '房产',      kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e' },
-    { id: 'a_car',        name: '车辆',      kind: 'asset',     group: '固定资产', icon: 'fa-car-side',             color: '#636e72' },
-    { id: 'a_receivable', name: '应收借款',  kind: 'asset',     group: '其他资产', icon: 'fa-hand-holding-dollar',  color: '#ff2d55' },
+    { id: 'a_cash',       name: '现金',      kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759' , bucket: 'cash'},
+    { id: 'a_debit',      name: '储蓄卡',    kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#5ac8fa' , bucket: 'cash'},
+    { id: 'a_fixed',      name: '定期存款',  kind: 'asset',     group: '储蓄存款', icon: 'fa-vault',                color: '#007aff' , bucket: 'steady'},
+    { id: 'a_mmf',        name: '货币基金',  kind: 'asset',     group: '投资理财', icon: 'fa-coins',                color: '#ffcc00' , bucket: 'cash'},
+    { id: 'a_stock',      name: '股票基金',  kind: 'asset',     group: '投资理财', icon: 'fa-arrow-trend-up',       color: '#ff9500' , bucket: 'growth'},
+    { id: 'a_wealth',     name: '理财产品',  kind: 'asset',     group: '投资理财', icon: 'fa-certificate',          color: '#af52de' , bucket: 'steady'},
+    { id: 'a_fund',       name: '公积金',    kind: 'asset',     group: '其他资产', icon: 'fa-house-chimney',        color: '#30b0c7' , bucket: 'growth'},
+    { id: 'a_house',      name: '房产',      kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e' , bucket: 'growth'},
+    { id: 'a_car',        name: '车辆',      kind: 'asset',     group: '固定资产', icon: 'fa-car-side',             color: '#636e72' , bucket: 'growth'},
+    { id: 'a_receivable', name: '应收借款',  kind: 'asset',     group: '其他资产', icon: 'fa-hand-holding-dollar',  color: '#ff2d55' , bucket: 'cash'},
     { id: 'l_credit',     name: '信用卡',    kind: 'liability', group: '消费负债', icon: 'fa-credit-card',          color: '#ff3b30' },
     { id: 'l_install',    name: '花呗/白条', kind: 'liability', group: '消费负债', icon: 'fa-mobile-screen-button', color: '#ff9500' },
     { id: 'l_mortgage',   name: '房贷',      kind: 'liability', group: '大额负债', icon: 'fa-house-circle-check',   color: '#5856d6' },
@@ -104,6 +104,15 @@ const DEFAULT_ACCOUNTS = [
     { id: 'l_personal',   name: '私人借款',  kind: 'liability', group: '其他负债', icon: 'fa-handshake',            color: '#8e8e93' },
     { id: 'l_other',      name: '其他负债',  kind: 'liability', group: '其他负债', icon: 'fa-ellipsis',             color: '#aeaeb2' },
 ];
+
+// 四笔钱：三个资产桶 + 保险保障清单
+const FUND_BUCKETS = [
+    { key: 'cash',   name: '活钱管理', color: '#34c759', icon: 'fa-wallet',            hint: '随取随用，一般留 3-6 个月开销' },
+    { key: 'steady', name: '稳健理财', color: '#007aff', icon: 'fa-shield-halved',     hint: '低风险、求稳的增值部分' },
+    { key: 'growth', name: '长期投资', color: '#ff9500', icon: 'fa-arrow-trend-up',    hint: '拿得住、博长期回报的部分' },
+];
+const INSURANCE_TYPES = ['社保', '惠民保', '意外险', '医疗险', '重疾险', '财产险', '燃气险', '家庭成员责任险'];
+const DEFAULT_INSURANCE_MEMBERS = ['本人'];
 
 const ASSET_GROUPS = ['流动资金', '储蓄存款', '投资理财', '固定资产', '其他资产'];
 const LIABILITY_GROUPS = ['消费负债', '大额负债', '其他负债'];
@@ -152,9 +161,12 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], insurance: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
+    fundTargets: { cash: 0, steady: 0, growth: 0 },
+    insuranceMembers: [...DEFAULT_INSURANCE_MEMBERS],
+    insurancePolicies: [],   // {id, type, member, covered, amount, premium, createdAt, updatedAt}
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -195,6 +207,9 @@ function saveStateNow() {
         paymentMethods: state.paymentMethods,
         accounts: state.accounts,
         balances: state.balances,
+        fundTargets: state.fundTargets,
+        insuranceMembers: state.insuranceMembers,
+        insurancePolicies: state.insurancePolicies,
         settings: state.settings,
         categoryVersion: state.categoryVersion || 2,
         deleted: state.deleted,
@@ -255,6 +270,7 @@ function normalizeTombstones(raw) {
         paymentMethods: clean(src.paymentMethods),
         accounts: clean(src.accounts),
         balances: clean(src.balances),
+        insurance: clean(src.insurance),
     };
 }
 
@@ -302,6 +318,7 @@ function applyTombstones() {
     state.budgets = drop(state.budgets, state.deleted.budgets);
     state.accounts = drop(state.accounts, state.deleted.accounts);
     state.balances = drop(state.balances, state.deleted.balances);
+    state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
 
     // Payment methods are plain strings with no per-row timestamp, so "when was
     // this added" lives in pmAddedAt. Unknown age counts as 0, i.e. a deletion
@@ -396,6 +413,9 @@ async function syncToICloud() {
                 paymentMethods: state.paymentMethods,
                 accounts: state.accounts,
                 balances: state.balances,
+                fundTargets: state.fundTargets,
+                insuranceMembers: state.insuranceMembers,
+                insurancePolicies: state.insurancePolicies,
                 settings: state.settings,
                 deleted: state.deleted,
                 pmAddedAt: state.pmAddedAt,
@@ -483,7 +503,21 @@ function mergeRemoteData(remoteData) {
         paymentMethods: mergeTombstoneList(state.deleted.paymentMethods, remoteDeleted.paymentMethods),
         accounts: mergeTombstoneList(state.deleted.accounts, remoteDeleted.accounts),
         balances: mergeTombstoneList(state.deleted.balances, remoteDeleted.balances),
+        insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
     };
+
+    // 保险清单：按 id 取并集，较新的赢；成员取并集；目标金额取较新的一份
+    const polMap = new Map();
+    state.insurancePolicies.forEach(p => polMap.set(p.id, p));
+    (remote.insurancePolicies || []).forEach(p => {
+        const cur = polMap.get(p.id);
+        if (!cur || (p.updatedAt || 0) > (cur.updatedAt || 0)) polMap.set(p.id, p);
+    });
+    state.insurancePolicies = Array.from(polMap.values());
+    state.insuranceMembers = [...new Set([...(state.insuranceMembers || []), ...(remote.insuranceMembers || [])])];
+    if ((remoteData.lastModified || 0) >= (iCloudLastSyncTime || 0) && remote.fundTargets) {
+        state.fundTargets = { ...state.fundTargets, ...remote.fundTargets };
+    }
 
     state.transactions = Array.from(txnMap.values());
     state.categories = Array.from(catMap.values());
@@ -517,6 +551,9 @@ function exportToICloud() {
             paymentMethods: state.paymentMethods,
             accounts: state.accounts,
             balances: state.balances,
+            fundTargets: state.fundTargets,
+            insuranceMembers: state.insuranceMembers,
+            insurancePolicies: state.insurancePolicies,
             settings: state.settings,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
@@ -652,6 +689,9 @@ function loadState() {
                 ? data.accounts
                 : DEFAULT_ACCOUNTS.map(a => ({ ...a }));
             state.balances = Array.isArray(data.balances) ? data.balances : [];
+            state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
+            state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
+            state.insurancePolicies = Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [];
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
@@ -794,6 +834,7 @@ function renderView(viewName) {
         case 'reports': renderReports(); break;
         case 'budget': renderBudget(); break;
         case 'balance': renderBalance(); break;
+        case 'funds': renderFourFunds(); break;
         case 'categories': renderCategories(); break;
         case 'settings': renderSettings(); break;
     }
@@ -3190,6 +3231,9 @@ function clearAllData() {
     state.budgets = [];
     state.balances = [];
     state.accounts = DEFAULT_ACCOUNTS.map(a => ({ ...a }));
+    state.fundTargets = { cash: 0, steady: 0, growth: 0 };
+    state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
+    state.insurancePolicies = [];
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
     state.deleted = normalizeTombstones(null);
     state.pmAddedAt = {};
@@ -3967,6 +4011,294 @@ function initBalanceListeners() {
     });
 }
 
+// ==================== 四笔钱 ====================
+// 三个资产桶（活钱/稳健/长期）按最新一期余额汇总，保险保障是配置清单，不占资产比例。
+
+let fundEditMember = null;   // 保险清单当前编辑的成员
+
+function fundLatestMonth() {
+    const m = balanceMonths();
+    return m[m.length - 1] || null;
+}
+
+function fundActualByBucket() {
+    const month = fundLatestMonth();
+    const map = month ? balancesAtMonth(month) : {};
+    const out = { cash: 0, steady: 0, growth: 0, unassigned: 0 };
+    state.accounts.filter(a => a.kind === 'asset').forEach(a => {
+        const v = map[a.id] || 0;
+        if (a.bucket && out[a.bucket] !== undefined) out[a.bucket] += v;
+        else out.unassigned += v;
+    });
+    return out;
+}
+
+function fundTotalAssets() {
+    const b = fundActualByBucket();
+    return b.cash + b.steady + b.growth + b.unassigned;
+}
+
+function fundLiabilities() {
+    const month = fundLatestMonth();
+    const map = month ? balancesAtMonth(month) : {};
+    return state.accounts.filter(a => a.kind === 'liability').reduce((s, a) => s + (map[a.id] || 0), 0);
+}
+
+// 某类型（可含成员）是否已配置
+function insPolicy(type, member) {
+    return state.insurancePolicies.find(p => p.type === type && p.member === member);
+}
+function insTypeCovered(type) {
+    return state.insurancePolicies.some(p => p.type === type && p.covered);
+}
+function insTypeAmount(type) {
+    return state.insurancePolicies.filter(p => p.type === type && p.covered)
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+}
+function insCoveredCount() {
+    return INSURANCE_TYPES.filter(insTypeCovered).length;
+}
+function insTotalAmount() {
+    return INSURANCE_TYPES.reduce((s, t) => s + insTypeAmount(t), 0);
+}
+function insTotalPremium() {
+    return state.insurancePolicies.filter(p => p.covered).reduce((s, p) => s + (Number(p.premium) || 0), 0);
+}
+
+function renderFourFunds() {
+    if (!document.getElementById('view-funds')) return;
+    if (!fundEditMember || !state.insuranceMembers.includes(fundEditMember)) {
+        fundEditMember = state.insuranceMembers[0] || '本人';
+    }
+    renderFundQuadrant();
+    renderFundCards();
+    renderFundDonut();
+    renderInsuranceSection();
+    renderFundDebt();
+    renderFundUnassigned();
+}
+
+// ---- 顶部 2×2 象限 ----
+function renderFundQuadrant() {
+    const box = document.getElementById('fundQuadrant');
+    if (!box) return;
+    const actual = fundActualByBucket();
+    const total = fundTotalAssets();
+    const cells = FUND_BUCKETS.map(bk => {
+        const act = actual[bk.key] || 0;
+        const tgt = state.fundTargets[bk.key] || 0;
+        const pct = tgt > 0 ? Math.min(act / tgt, 1) : (act > 0 ? 1 : 0);
+        const share = total > 0 ? Math.round(act / total * 100) : 0;
+        return `
+        <div class="fq-cell" style="--fq-color:${bk.color}">
+            <div class="fq-fill" style="width:${(pct * 100).toFixed(0)}%"></div>
+            <div class="fq-name"><i class="fa-solid ${bk.icon}"></i> ${bk.name}</div>
+            <div class="fq-act">${formatCurrency(act)}</div>
+            <div class="fq-meta">目标 ${formatCurrency(tgt)} · 占 ${share}%</div>
+        </div>`;
+    });
+    const insDone = insCoveredCount();
+    cells.push(`
+        <div class="fq-cell fq-ins" style="--fq-color:#af52de">
+            <div class="fq-fill" style="width:${(insDone / INSURANCE_TYPES.length * 100).toFixed(0)}%"></div>
+            <div class="fq-name"><i class="fa-solid fa-umbrella"></i> 保险保障</div>
+            <div class="fq-act">${insDone}/${INSURANCE_TYPES.length} 已配</div>
+            <div class="fq-meta">总保额 ${formatCurrency(insTotalAmount())}</div>
+        </div>`);
+    box.innerHTML = cells.join('');
+}
+
+// ---- 三张资产桶卡片（实际/目标/进度 + 目标编辑）----
+function renderFundCards() {
+    const box = document.getElementById('fundCards');
+    if (!box) return;
+    const actual = fundActualByBucket();
+    const total = fundTotalAssets();
+    box.innerHTML = FUND_BUCKETS.map(bk => {
+        const act = actual[bk.key] || 0;
+        const tgt = state.fundTargets[bk.key] || 0;
+        const pct = tgt > 0 ? (act / tgt * 100) : 0;
+        const gap = act - tgt;
+        const share = total > 0 ? (act / total * 100) : 0;
+        const sharePct = total > 0 ? (act / total * 100).toFixed(1) : '0.0';
+        return `
+        <div class="fund-card">
+            <div class="fc-head">
+                <span class="fc-title"><i class="fa-solid ${bk.icon}" style="color:${bk.color}"></i> ${bk.name}</span>
+                <span class="fc-hint">${bk.hint}</span>
+            </div>
+            <div class="fc-nums">
+                <div class="fc-act" style="color:${bk.color}">${formatCurrency(act)}</div>
+                <div class="fc-share">占资产 ${sharePct}%</div>
+            </div>
+            <div class="fc-bar"><div class="fc-bar-fill" style="width:${Math.min(pct, 100).toFixed(0)}%;background:${bk.color}"></div></div>
+            <div class="fc-target">
+                <span>目标</span>
+                <span class="fc-cur">${state.settings.currency}</span>
+                <input type="number" class="fc-amt" data-bucket="${bk.key}" value="${tgt || ''}" placeholder="0" inputmode="decimal">
+                <span class="fc-pctsep">或</span>
+                <input type="number" class="fc-pct" data-bucket="${bk.key}" value="${total > 0 ? (tgt / total * 100).toFixed(0) : ''}" placeholder="%" inputmode="numeric">
+                <span>%</span>
+            </div>
+            <div class="fc-gap ${gap < 0 ? 'under' : 'ok'}">${tgt > 0 ? (gap < 0 ? `还差 ${formatCurrency(-gap)}` : `已达标，超出 ${formatCurrency(gap)}`) : '未设目标'}</div>
+        </div>`;
+    }).join('');
+    box.querySelectorAll('.fc-amt').forEach(inp => inp.addEventListener('change', () => setFundTarget(inp.dataset.bucket, parseFloat(inp.value) || 0, 'amount')));
+    box.querySelectorAll('.fc-pct').forEach(inp => inp.addEventListener('change', () => setFundTargetPct(inp.dataset.bucket, parseFloat(inp.value) || 0)));
+}
+
+function setFundTarget(key, amount) {
+    state.fundTargets[key] = Math.max(0, amount || 0);
+    saveState();
+    renderFourFunds();
+}
+function setFundTargetPct(key, pct) {
+    const total = fundTotalAssets();
+    state.fundTargets[key] = Math.max(0, Math.round(total * (pct || 0) / 100 * 100) / 100);
+    saveState();
+    renderFourFunds();
+}
+
+// ---- 三桶实际配比环形图 ----
+let fundChart = null;
+function renderFundDonut() {
+    const canvas = document.getElementById('fundDonut');
+    if (!canvas) return;
+    const draw = () => {
+        const actual = fundActualByBucket();
+        const labels = FUND_BUCKETS.map(b => b.name).concat(actual.unassigned > 0 ? ['未分配'] : []);
+        const data = FUND_BUCKETS.map(b => Math.round((actual[b.key] || 0) * 100) / 100)
+            .concat(actual.unassigned > 0 ? [Math.round(actual.unassigned * 100) / 100] : []);
+        const colors = FUND_BUCKETS.map(b => b.color).concat(actual.unassigned > 0 ? ['#c7c7cc'] : []);
+        if (typeof Chart === 'undefined') { loadChartLib().then(draw).catch(() => {}); return; }
+        if (fundChart) fundChart.destroy();
+        const empty = document.getElementById('fundDonutEmpty');
+        const total = data.reduce((s, v) => s + v, 0);
+        if (total <= 0) { if (empty) empty.classList.remove('hidden'); if (canvas) canvas.parentElement.classList.add('hidden'); fundChart = null; return; }
+        if (empty) empty.classList.add('hidden');
+        if (canvas) canvas.parentElement.classList.remove('hidden');
+        fundChart = new Chart(canvas, {
+            type: 'doughnut',
+            data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 8, radius: (canvas.parentElement.clientWidth < 520) ? '72%' : '100%' }] },
+            plugins: [pieLabelPlugin, doughnutTotalPlugin],
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                layout: { padding: { left: 24, right: 24, top: 8, bottom: 8 } },
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${formatCurrency(c.raw)}` } } },
+            },
+        });
+        fundChart.$centerText = { label: '总资产', value: formatCurrency(total) };
+    };
+    draw();
+}
+
+// ---- 负债单独一行 ----
+function renderFundDebt() {
+    const el = document.getElementById('fundDebtRow');
+    if (!el) return;
+    const liab = fundLiabilities();
+    const assets = fundTotalAssets();
+    const ratio = assets > 0 ? (liab / assets * 100).toFixed(1) : '0.0';
+    el.innerHTML = `<span class="fd-label"><i class="fa-solid fa-credit-card"></i> 负债（不计入四笔钱）</span>
+        <span class="fd-val">总负债 ${formatCurrency(liab)} · 负债率 ${ratio}%</span>`;
+}
+
+// ---- 未分配账户提示 ----
+function renderFundUnassigned() {
+    const el = document.getElementById('fundUnassignedRow');
+    if (!el) return;
+    const un = state.accounts.filter(a => a.kind === 'asset' && !a.bucket);
+    if (!un.length) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.innerHTML = `<span class="fu-text"><i class="fa-solid fa-circle-exclamation"></i> 有 ${un.length} 个资产账户未归类：${un.map(a => a.name).join('、')}</span>
+        <button class="secondary-btn" onclick="openFundAccounts()">去归类</button>`;
+}
+
+// ---- 保险保障：成员 + 8 险种清单 ----
+function renderInsuranceSection() {
+    const membersBox = document.getElementById('insMembers');
+    const listBox = document.getElementById('insList');
+    if (!membersBox || !listBox) return;
+    membersBox.innerHTML = state.insuranceMembers.map(m =>
+        `<button class="ins-member ${m === fundEditMember ? 'active' : ''}" onclick="setInsMember('${m.replace(/'/g, "\\'")}')">${m}</button>`
+    ).join('') + `<button class="ins-member ins-add" onclick="addInsMember()"><i class="fa-solid fa-plus"></i> 成员</button>`;
+
+    listBox.innerHTML = INSURANCE_TYPES.map(type => {
+        const p = insPolicy(type, fundEditMember);
+        const covered = !!(p && p.covered);
+        return `
+        <div class="ins-row ${covered ? 'on' : ''}">
+            <label class="ins-check">
+                <input type="checkbox" data-type="${type}" ${covered ? 'checked' : ''}>
+                <span class="ins-box"><i class="fa-solid fa-check"></i></span>
+            </label>
+            <span class="ins-type">${type}</span>
+            <span class="ins-field"><em>保额</em><input type="number" class="ins-amt" data-type="${type}" value="${p && p.amount ? p.amount : ''}" placeholder="0" inputmode="decimal"></span>
+            <span class="ins-field"><em>年保费</em><input type="number" class="ins-prem" data-type="${type}" value="${p && p.premium ? p.premium : ''}" placeholder="0" inputmode="decimal"></span>
+        </div>`;
+    }).join('');
+
+    listBox.querySelectorAll('.ins-check input').forEach(cb => cb.addEventListener('change', () => upsertIns(cb.dataset.type, { covered: cb.checked })));
+    listBox.querySelectorAll('.ins-amt').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { amount: parseFloat(inp.value) || 0 })));
+    listBox.querySelectorAll('.ins-prem').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { premium: parseFloat(inp.value) || 0 })));
+}
+
+function setInsMember(m) { fundEditMember = m; renderInsuranceSection(); }
+
+function addInsMember() {
+    const name = prompt('成员姓名（如：配偶、父亲、儿子）');
+    if (!name || !name.trim()) return;
+    const n = name.trim();
+    if (state.insuranceMembers.includes(n)) { showToast('已有该成员', 'error'); return; }
+    state.insuranceMembers.push(n);
+    fundEditMember = n;
+    saveState();
+    renderFourFunds();
+}
+
+function upsertIns(type, patch) {
+    const member = fundEditMember;
+    let p = insPolicy(type, member);
+    if (!p) {
+        p = { id: `${type}__${member}`, type, member, covered: false, amount: 0, premium: 0, createdAt: Date.now(), updatedAt: Date.now() };
+        state.insurancePolicies.push(p);
+    }
+    Object.assign(p, patch, { updatedAt: Date.now() });
+    saveState();
+    renderFundQuadrant();
+    renderInsuranceSection();
+}
+
+// ---- 账户归类管理 ----
+function openFundAccounts() {
+    renderFundAccountPicker();
+    document.getElementById('fundAccountsModal').classList.remove('hidden');
+    raiseOverlay('fundAccountsModal');
+}
+function closeFundAccountsModal() { document.getElementById('fundAccountsModal').classList.add('hidden'); }
+
+function renderFundAccountPicker() {
+    const box = document.getElementById('fundAccountList');
+    if (!box) return;
+    box.innerHTML = state.accounts.filter(a => a.kind === 'asset').map(a => `
+        <div class="facct-row">
+            <span class="facct-name"><i class="fa-solid ${a.icon}" style="color:${a.color}"></i> ${a.name}</span>
+            <select class="facct-select" data-account="${a.id}">
+                <option value="" ${!a.bucket ? 'selected' : ''}>未分配</option>
+                ${FUND_BUCKETS.map(b => `<option value="${b.key}" ${a.bucket === b.key ? 'selected' : ''}>${b.name}</option>`).join('')}
+            </select>
+        </div>`).join('');
+    box.querySelectorAll('.facct-select').forEach(sel => sel.addEventListener('change', () => {
+        const a = accountById(sel.dataset.account);
+        if (a) { a.bucket = sel.value; a.updatedAt = Date.now(); saveState(); renderFourFunds(); renderFundAccountPicker(); }
+    }));
+}
+
+function initFundListeners() {
+    const btn = document.getElementById('fundAccountsBtn');
+    if (btn) btn.addEventListener('click', openFundAccounts);
+}
+
 // ---- Event Listeners ----
 function initEventListeners() {
     // Navigation
@@ -4042,6 +4374,9 @@ function initEventListeners() {
 
     // Balance sheet view
     initBalanceListeners();
+
+    // 四笔钱
+    initFundListeners();
 
     // Report year/month selectors
     document.getElementById('reportYearSelect').addEventListener('change', (e) => {
