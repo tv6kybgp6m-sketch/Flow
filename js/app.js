@@ -193,9 +193,24 @@ let charts = {};
 // ---- Storage ----
 const STORAGE_KEY = 'bookkeeping_app_data';
 
+// 每台安装一个唯一 id：iCloud 同步用它区分「我自己写的」和「别的设备写的」。
+// 之前用 deviceName === 'Mac' 判断，两台 Mac 会互相把对方的改动当成自己的而丢掉。
+const DEVICE_ID = (function () {
+    const KEY = STORAGE_KEY + '_device_id';
+    try {
+        let v = localStorage.getItem(KEY);
+        if (!v) { v = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); localStorage.setItem(KEY, v); }
+        return v;
+    } catch (e) { return 'dev_transient'; }
+})();
+
 // 节流写入：连续改动只在约 400ms 内落盘一次，避免每记一笔都把整本账重新序列化。
 // 关页面 / 切后台时强制补写，保证不丢。
 let __saveTimer = null;
+
+// 合并远端数据后若本地内容其实没变，就只落盘、不回推 iCloud。
+// 否则两台设备会互相触发对方的「远端有更新」，无限来回写。
+let __suppressSyncSchedule = false;
 
 function saveState() {
     if (__saveTimer) return;                       // 已排队，等这次窗口结束统一写
@@ -229,7 +244,7 @@ function saveStateNow() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
     // Trigger iCloud sync (debounced)
-    scheduleICloudSync();
+    if (!__suppressSyncSchedule) scheduleICloudSync();
 }
 
 // ---- Modal stacking ----
@@ -417,7 +432,8 @@ async function syncToICloud() {
         const syncData = {
             version: 1,
             lastModified: Date.now(),
-            deviceName: 'Mac',
+            deviceName: isElectron() ? ('Mac-' + DEVICE_ID.slice(-4)) : 'iPhone',
+            deviceId: DEVICE_ID,
             data: {
                 transactions: state.transactions,
                 categories: state.categories,
@@ -444,17 +460,39 @@ async function syncToICloud() {
 
 function handleICloudFileChange(remoteData) {
     if (!remoteData || !remoteData.data) return;
-    // Don't process our own writes
-    if (remoteData.deviceName === 'Mac') return;
+    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
+    if (remoteData.deviceId && remoteData.deviceId === DEVICE_ID) return;
+    if (!remoteData.deviceId && remoteData.deviceName === 'Mac' && isElectron()) return;
 
-    mergeRemoteData(remoteData);
+    const changed = mergeRemoteData(remoteData);
+    if (!changed) return;                 // 对端只是回写了一份和这里相同的内容
     renderView(state.currentView);
     showToast('已从 iCloud 同步最新数据', 'success');
 }
 
+// 内容指纹：只看每行的 id + 时间戳，忽略数组顺序（合并会重建数组，顺序变化不算改动）。
+// 用于判断「这次合并到底改没改东西」，没改就不回推 iCloud。
+function syncFingerprint() {
+    const sig = list => (Array.isArray(list) ? list : [])
+        .map(x => `${x.id !== undefined ? x.id : ''}:${x.updatedAt !== undefined ? x.updatedAt : (x.deletedAt || '')}`)
+        .sort().join(',');
+    const d = state.deleted || {};
+    return [
+        sig(state.transactions), sig(state.categories), sig(state.budgets),
+        sig(state.accounts), sig(state.balances), sig(state.returns),
+        sig(state.insurancePolicies),
+        (state.paymentMethods || []).slice().sort().join(','),
+        (state.balanceMembers || []).slice().sort().join(','),
+        (state.insuranceMembers || []).slice().sort().join(','),
+        JSON.stringify(state.fundTargets || {}),
+        sig(d.transactions), sig(d.balances), sig(d.returns), sig(d.accounts), sig(d.insurance),
+    ].join('|');
+}
+
 function mergeRemoteData(remoteData) {
     const remote = remoteData.data;
-    if (!remote) return;
+    if (!remote) return false;
+    const fingerprintBefore = syncFingerprint();
 
     // Merge transactions: union by ID, keep latest
     const txnMap = new Map();
@@ -556,9 +594,18 @@ function mergeRemoteData(remoteData) {
         document.documentElement.setAttribute('data-theme', state.settings.theme);
     }
 
-    saveState(); // Save merged data locally
+    const changed = syncFingerprint() !== fingerprintBefore;
+    if (changed) {
+        saveState();                       // persist + schedule a push of our own
+    } else {
+        // 内容没变：只落本地，不回推，避免两台设备互相触发、无限写。
+        __suppressSyncSchedule = true;
+        saveStateNow();
+        __suppressSyncSchedule = false;
+    }
     iCloudLastSyncTime = Date.now();
     updateICloudSyncUI();
+    return changed;
 }
 
 // PWA: Export to iCloud (download JSON)
@@ -5374,7 +5421,7 @@ function initEventListeners() {
 }
 
 // ---- Init ----
-function init() {
+async function init() {
     loadState();
     pruneTombstones();
     applyTombstones();
@@ -5383,6 +5430,14 @@ function init() {
     initCategoryInteractions();
     switchView(state.settings.defaultView || 'transactions');
 
+    // 桌面版：先把 iCloud 上的账本拉下来合并，再决定要不要塞示例数据，
+    // 否则新机器上示例数据会和真实数据混在一起。
+    if (isElectron()) {
+        await initICloudSync();
+        renderView(state.currentView);
+        updateSidebarSummary();
+    }
+
     // 关页面 / 切到后台时把待写入的数据立刻落盘
     window.addEventListener('pagehide', () => { if (__saveTimer) flushState(); });
     document.addEventListener('visibilitychange', () => {
@@ -5390,7 +5445,8 @@ function init() {
     });
 
     // Auto-load sample data on first visit
-    if (state.transactions.length === 0 && !localStorage.getItem(STORAGE_KEY + '_visited')) {
+    const hasAnything = state.transactions.length > 0 || state.balances.length > 0 || state.returns.length > 0;
+    if (!hasAnything && !localStorage.getItem(STORAGE_KEY + '_visited')) {
         localStorage.setItem(STORAGE_KEY + '_visited', '1');
         loadSampleData();
     }
@@ -5403,8 +5459,8 @@ function init() {
     // Warm up Chart.js in the background once the first screen is on screen
     setTimeout(() => { if (typeof Chart === 'undefined') loadChartLib().catch(() => {}); }, 1200);
 
-    // Initialize iCloud sync
-    setTimeout(() => initICloudSync(), 500);
+    // Initialize iCloud sync (web/PWA has no native bridge, this just renders the manual UI)
+    if (!isElectron()) setTimeout(() => initICloudSync(), 500);
 }
 
 document.addEventListener('DOMContentLoaded', init);
