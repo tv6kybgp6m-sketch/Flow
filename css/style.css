@@ -3349,7 +3349,12 @@ table.bill-stats {
 }
 .account-row .ar-name { flex: 1; }
 
+/* ---- 投资收益 ---- */
+.ret-tip { font-size: 12px; color: var(--text-tertiary); align-self: center; margin-left: auto; }
+.bh-amount.income { color: var(--income); }
+.bh-amount.expense { color: var(--expense); }
+
 @media (max-width: 640px) {
     .bm-chip { font-size: 12px; padding: 4px 12px; }
-    .owner-select { font-size: 12px; padding: 4px 5px; }
+    .ret-tip { font-size: 11px; margin-left: 0; }
 }

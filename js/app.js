@@ -147,6 +147,12 @@ let state = {
     paymentMethods: [...DEFAULT_PAYMENT_METHODS],
     accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
     balances: [],
+    returns: [],               // 投资收益：{id, member, accountId, month, amount}
+    returnPeriod: 'month',
+    returnYear: null,
+    returnMonth: null,
+    returnChartType: 'bar',
+    returnGran: null,
     balancePeriod: 'month',
     balanceYear: null,
     balanceMonth: null,
@@ -161,7 +167,7 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], insurance: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], insurance: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
@@ -209,6 +215,7 @@ function saveStateNow() {
         paymentMethods: state.paymentMethods,
         accounts: state.accounts,
         balances: state.balances,
+        returns: state.returns,
         fundTargets: state.fundTargets,
         insuranceMembers: state.insuranceMembers,
         insurancePolicies: state.insurancePolicies,
@@ -273,6 +280,7 @@ function normalizeTombstones(raw) {
         paymentMethods: clean(src.paymentMethods),
         accounts: clean(src.accounts),
         balances: clean(src.balances),
+        returns: clean(src.returns),
         insurance: clean(src.insurance),
     };
 }
@@ -321,6 +329,7 @@ function applyTombstones() {
     state.budgets = drop(state.budgets, state.deleted.budgets);
     state.accounts = drop(state.accounts, state.deleted.accounts);
     state.balances = drop(state.balances, state.deleted.balances);
+    state.returns = drop(state.returns, state.deleted.returns);
     state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
 
     // Payment methods are plain strings with no per-row timestamp, so "when was
@@ -416,6 +425,7 @@ async function syncToICloud() {
                 paymentMethods: state.paymentMethods,
                 accounts: state.accounts,
                 balances: state.balances,
+                returns: state.returns,
                 fundTargets: state.fundTargets,
                 insuranceMembers: state.insuranceMembers,
                 insurancePolicies: state.insurancePolicies,
@@ -488,6 +498,14 @@ function mergeRemoteData(remoteData) {
         if (!cur || (b.updatedAt || 0) > (cur.updatedAt || 0)) balMap.set(b.id, b);
     });
 
+    // Merge investment returns: id is member + accountId + month
+    const retMap = new Map();
+    state.returns.forEach(r => retMap.set(r.id, r));
+    (remote.returns || []).forEach(r => {
+        const cur = retMap.get(r.id);
+        if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) retMap.set(r.id, r);
+    });
+
     // Merge payment methods: union by name, remember when each was added
     const pmSet = new Set(state.paymentMethods);
     (remote.paymentMethods || []).forEach(p => pmSet.add(p));
@@ -506,6 +524,7 @@ function mergeRemoteData(remoteData) {
         paymentMethods: mergeTombstoneList(state.deleted.paymentMethods, remoteDeleted.paymentMethods),
         accounts: mergeTombstoneList(state.deleted.accounts, remoteDeleted.accounts),
         balances: mergeTombstoneList(state.deleted.balances, remoteDeleted.balances),
+        returns: mergeTombstoneList(state.deleted.returns, remoteDeleted.returns),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
     };
 
@@ -527,6 +546,7 @@ function mergeRemoteData(remoteData) {
     state.budgets = Array.from(budMap.values());
     state.accounts = Array.from(accMap.values());
     state.balances = Array.from(balMap.values());
+    state.returns = Array.from(retMap.values());
     pruneTombstones();
     applyTombstones();
 
@@ -554,6 +574,7 @@ function exportToICloud() {
             paymentMethods: state.paymentMethods,
             accounts: state.accounts,
             balances: state.balances,
+            returns: state.returns,
             fundTargets: state.fundTargets,
             insuranceMembers: state.insuranceMembers,
             insurancePolicies: state.insurancePolicies,
@@ -692,6 +713,7 @@ function loadState() {
                 ? data.accounts
                 : DEFAULT_ACCOUNTS.map(a => ({ ...a }));
             state.balances = Array.isArray(data.balances) ? data.balances : [];
+            state.returns = Array.isArray(data.returns) ? data.returns : [];
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
             state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
             state.insurancePolicies = Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [];
@@ -855,6 +877,7 @@ function renderView(viewName) {
         case 'budget': renderBudget(); break;
         case 'balance': renderBalance(); break;
         case 'funds': renderFourFunds(); break;
+        case 'returns': renderReturns(); break;
         case 'categories': renderCategories(); break;
         case 'settings': renderSettings(); break;
     }
@@ -2922,7 +2945,7 @@ function markExported() {
 function renderBackupBanner() {
     const banner = document.getElementById('backupBanner');
     if (!banner) return;
-    const hasData = state.transactions.length > 0 || state.balances.length > 0;
+    const hasData = state.transactions.length > 0 || state.balances.length > 0 || state.returns.length > 0;
     if (!hasData) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
     const days = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / 86400000) : null;
     if (days !== null && days < BACKUP_REMIND_DAYS) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
@@ -3239,6 +3262,26 @@ function loadSampleData() {
     });
 
     state.transactions = samples;
+
+    // 投资收益示例：与余额同样的 6 个月，含亏损月份
+    const retSeed = {
+        a_stock:  [1200, -800, 2400, 3100, -1500, 2600],
+        a_wealth: [320, 310, 340, 300, 350, 330],
+        a_fixed:  [160, 160, 180, 180, 180, 200],
+        a_mmf:    [45, 52, 48, 60, 55, 66],
+    };
+    state.returns = [];
+    Object.entries(retSeed).forEach(([accountId, series]) => {
+        if (!state.accounts.some(a => a.id === accountId)) return;
+        const member = memberForAccount(accountId);
+        balMonths.forEach((month, idx) => {
+            state.returns.push({
+                id: `${member}__${accountId}__${month}`, member, accountId, month, amount: series[idx],
+                createdAt: Date.now(), updatedAt: Date.now(),
+            });
+        });
+    });
+
     state.budgets = [
         { id: uid(), categoryId: 'e_food', amount: 2000 },
         { id: uid(), categoryId: 'e_transport', amount: 500 },
@@ -3255,8 +3298,11 @@ function clearAllData() {
     state.transactions = [];
     state.budgets = [];
     state.balances = [];
+    state.returns = [];
     state.accounts = DEFAULT_ACCOUNTS.map(a => ({ ...a }));
     state.fundTargets = { cash: 0, steady: 0, growth: 0 };
+    state.balanceMembers = ['本人'];
+    state.balanceOwner = 'all';
     state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
     state.insurancePolicies = [];
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
@@ -3837,8 +3883,10 @@ function deleteAccountFromHistory(accountId) {
 function removeAccount(accountId) {
     addTombstone('accounts', accountId);
     state.balances.filter(b => b.accountId === accountId).forEach(b => addTombstone('balances', b.id));
+    state.returns.filter(r => r.accountId === accountId).forEach(r => addTombstone('returns', r.id));
     state.accounts = state.accounts.filter(a => a.id !== accountId);
     state.balances = state.balances.filter(b => b.accountId !== accountId);
+    state.returns = state.returns.filter(r => r.accountId !== accountId);
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
@@ -4357,19 +4405,30 @@ function initFundListeners() {
 // ==================== 家庭资产负债表：成员切换 + 汇总 + 归属 ====================
 function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-function renderBalanceMemberBar() {
-    const bar = document.getElementById('balMemberBar');
-    if (!bar) return;
+function memberBarHTML() {
     let html = `<button class="bm-chip ${state.balanceOwner === 'all' ? 'active' : ''}" onclick="setBalanceOwner('all')">全部</button>`;
     html += state.balanceMembers.map(m =>
         `<button class="bm-chip ${state.balanceOwner === m ? 'active' : ''}" onclick="setBalanceOwner('${_esc(m)}')">${_esc(m)}</button>`).join('');
     html += `<button class="bm-chip bm-add" onclick="addBalanceMember()"><i class="fa-solid fa-user-plus"></i> 成员</button>`;
-    bar.innerHTML = html;
+    return html;
+}
+
+function renderBalanceMemberBar() {
+    ['balMemberBar', 'retMemberBar'].forEach(id => {
+        const bar = document.getElementById(id);
+        if (bar) bar.innerHTML = memberBarHTML();
+    });
+}
+
+function renderFamilyBars() {
+    renderBalance();
+    renderReturns();
 }
 
 function setBalanceOwner(m) {
     state.balanceOwner = m;
     renderBalance();
+    renderReturns();
 }
 
 function addBalanceMember() {
@@ -4379,7 +4438,7 @@ function addBalanceMember() {
     if (state.balanceMembers.includes(n)) { showToast('已有该成员', 'error'); return; }
     state.balanceMembers.push(n);
     saveState();
-    renderBalance();
+    renderFamilyBars();
 }
 
 function _rebalanceId(member, accountId, month) { return `${member}__${accountId}__${month}`; }
@@ -4396,36 +4455,54 @@ function renameBalanceMember(old) {
         b.id = _rebalanceId(n, b.accountId, b.month);
         b.updatedAt = Date.now();
     });
+    state.returns.forEach(r => {
+        if (r.member !== old) return;
+        r.member = n;
+        r.id = _rebalanceId(n, r.accountId, r.month);
+        r.updatedAt = Date.now();
+    });
     if (state.balanceOwner === old) state.balanceOwner = n;
     saveState();
-    renderBalance();
+    renderFamilyBars();
     renderAccountManageList();
+}
+
+// 把 from 成员的记录并入 to 成员：同账户同月已存在则金额相加，否则直接改归属
+function _mergeMemberRows(list, from, to) {
+    const byId = {};
+    list.forEach(r => { byId[r.id] = r; });
+    const dropIds = [];
+    list.forEach(r => {
+        if (r.member !== from) return;
+        const targetId = _rebalanceId(to, r.accountId, r.month);
+        const tgt = byId[targetId];
+        if (tgt && tgt !== r) {
+            tgt.amount = (Number(tgt.amount) || 0) + (Number(r.amount) || 0);
+            tgt.updatedAt = Date.now();
+            dropIds.push(r.id);
+        } else {
+            r.member = to;
+            r.id = targetId;
+            r.updatedAt = Date.now();
+            byId[targetId] = r;
+        }
+    });
+    return list.filter(r => dropIds.indexOf(r.id) < 0);
 }
 
 function deleteBalanceMember(name) {
     if (state.balanceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
-    const mine = state.balances.filter(b => b.member === name);
     const fallback = state.balanceMembers.find(m => m !== name);
-    if (!confirm(`删除成员「${name}」？${mine.length ? `TA 的 ${mine.length} 条余额记录会并入「${fallback}」。` : ''}`)) return;
-    const byId = {};
-    state.balances.forEach(b => { byId[b.id] = b; });
-    mine.forEach(b => {
-        const targetId = _rebalanceId(fallback, b.accountId, b.month);
-        const tgt = byId[targetId];
-        if (tgt) {
-            tgt.amount = (Number(tgt.amount) || 0) + (Number(b.amount) || 0);
-            tgt.updatedAt = Date.now();
-            state.balances = state.balances.filter(x => x.id !== b.id);
-        } else {
-            b.member = fallback;
-            b.id = targetId;
-            b.updatedAt = Date.now();
-        }
-    });
+    const mineBal = state.balances.filter(b => b.member === name).length;
+    const mineRet = state.returns.filter(r => r.member === name).length;
+    const total = mineBal + mineRet;
+    if (!confirm(`删除成员「${name}」？${total ? `TA 的 ${total} 条记录（余额 ${mineBal} / 收益 ${mineRet}）会并入「${fallback}」。` : ''}`)) return;
+    state.balances = _mergeMemberRows(state.balances, name, fallback);
+    state.returns = _mergeMemberRows(state.returns, name, fallback);
     state.balanceMembers = state.balanceMembers.filter(m => m !== name);
     if (state.balanceOwner === name) state.balanceOwner = 'all';
     saveState();
-    renderBalance();
+    renderFamilyBars();
     renderAccountManageList();
 }
 
@@ -4465,6 +4542,655 @@ function renderFamilySummary() {
             <td>${money(tL)}</td>
             <td>${money(tA - tL)}</td>
         </tr>`;
+}
+
+// ==================== 投资收益 ====================
+// 与资产负债同一套成员维度：账户全家共用，收益记录落在「成员 + 账户 + 月份」上。
+let returnRenderToken = 0;
+let returnHistoryAccountId = null;
+
+function returnMonths() { return [...new Set(state.returns.map(r => r.month))].sort(); }
+function returnYears() { return [...new Set(returnMonths().map(m => m.slice(0, 4)))].sort(); }
+
+// 某月各账户收益（按当前成员筛选；'all' = 全家相加）
+function returnsAtMonth(month, member = state.balanceOwner) {
+    const map = {};
+    if (!month) return map;
+    state.returns
+        .filter(r => r.month === month && (member === 'all' || r.member === member))
+        .forEach(r => { map[r.accountId] = (map[r.accountId] || 0) + (Number(r.amount) || 0); });
+    return map;
+}
+
+function returnMonthHasRecords(month) {
+    return !!month && state.returns.some(r => r.month === month);
+}
+
+// 只列用户真正持有的资产账户（记过余额或记过收益），一个都没有就退回全部资产账户
+function returnCandidateAccounts() {
+    const held = new Set();
+    state.balances.forEach(b => held.add(b.accountId));
+    state.returns.forEach(r => held.add(r.accountId));
+    const assets = state.accounts.filter(a => a.kind === 'asset');
+    const picked = assets.filter(a => held.has(a.id));
+    return picked.length ? picked : assets;
+}
+
+// 一段月份的合计 + 分账户明细
+function returnSummary(months, member = state.balanceOwner) {
+    const byAccount = {};
+    let total = 0;
+    (months || []).forEach(m => {
+        const map = returnsAtMonth(m, member);
+        Object.keys(map).forEach(id => {
+            byAccount[id] = (byAccount[id] || 0) + map[id];
+            total += map[id];
+        });
+    });
+    return { total, byAccount };
+}
+
+function returnPeriodInfo() {
+    const now = new Date();
+    const months = returnMonths();
+    const years = returnYears();
+    const period = state.returnPeriod;
+    const selYear = state.returnYear || now.getFullYear();
+    const selMonth = state.returnMonth || (now.getMonth() + 1);
+
+    if (period === 'all') {
+        return { period, title: '全部', months, month: months[months.length - 1] || null, year: years[years.length - 1] || null };
+    }
+    if (period === 'year') {
+        return { period, title: `${selYear}年`, months: months.filter(m => m.slice(0, 4) === String(selYear)), year: selYear };
+    }
+    const key = `${selYear}-${String(selMonth).padStart(2, '0')}`;
+    return { period, title: `${selYear}年${selMonth}月`, months: months.filter(m => m === key), month: key, selYear, selMonth };
+}
+
+function renderReturnSelectors() {
+    const years = returnYears();
+    const now = new Date();
+    if (!years.length) return;
+    if (!state.returnYear || !years.includes(String(state.returnYear))) state.returnYear = years[years.length - 1];
+
+    const ySel = document.getElementById('returnYearSelect');
+    if (ySel) {
+        ySel.innerHTML = years.map(y => `<option value="${y}" ${String(state.returnYear) === y ? 'selected' : ''}>${y}年</option>`).join('');
+    }
+    const mSel = document.getElementById('returnMonthSelect');
+    if (mSel) {
+        const months = returnMonths().filter(m => m.slice(0, 4) === String(state.returnYear));
+        const opts = months.length ? months : [`${state.returnYear}-${String(now.getMonth() + 1).padStart(2, '0')}`];
+        const cur = state.returnMonth || Number((opts[opts.length - 1] || '').slice(5, 7)) || (now.getMonth() + 1);
+        mSel.innerHTML = opts.map(m => {
+            const mm = Number(m.slice(5, 7));
+            return `<option value="${mm}" ${mm === cur ? 'selected' : ''}>${mm}月</option>`;
+        }).join('');
+        state.returnMonth = cur;
+    }
+    const yWrap = document.getElementById('returnYearWrap');
+    const mWrap = document.getElementById('returnMonthWrap');
+    const showYear = state.returnPeriod !== 'all';
+    if (yWrap) yWrap.classList.toggle('hidden', !showYear);
+    if (mWrap) mWrap.classList.toggle('hidden', state.returnPeriod !== 'month');
+}
+
+function renderReturnMemberBar() {
+    const bar = document.getElementById('retMemberBar');
+    if (bar) bar.innerHTML = memberBarHTML();
+}
+
+function setReturnChartType(t) {
+    state.returnChartType = t;
+    document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retChart === t));
+    renderReturnChart();
+}
+
+function activeReturnGran() {
+    if (state.returnGran) return state.returnGran;
+    return state.returnPeriod === 'year' || state.returnPeriod === 'all' ? 'year' : 'month';
+}
+
+function setReturnGran(g) {
+    state.returnGran = g;
+    document.querySelectorAll('#view-returns [data-ret-gran]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retGran === g));
+    renderReturnChart();
+}
+
+function returnTrendBuckets() {
+    const all = returnMonths();
+    if (!all.length) return [];
+    if (activeReturnGran() === 'year') {
+        return returnYears().map(y => ({ key: y, label: `${y}年`, months: all.filter(m => m.slice(0, 4) === y) }));
+    }
+    return all.map(m => ({ key: m, label: m.replace('-', '年') + '月', months: [m] }));
+}
+
+function renderReturns() {
+    if (!document.getElementById('view-returns')) return;
+    renderReturnSelectors();
+
+    const info = returnPeriodInfo();
+    const cur = returnSummary(info.months);
+    const total = returnSummary(returnMonths()).total;
+    const years = returnYears();
+    const yearMonths = info.year ? returnMonths().filter(m => m.slice(0, 4) === String(info.year)) : [];
+    const yearTotal = info.year ? returnSummary(yearMonths).total : 0;
+
+    // 上期：月报=上一月，年报=上一年，总=最后一期的上一月
+    let prevMonths = [], prevLabel = '';
+    if (info.period === 'month' && info.month) {
+        const p = previousMonthOf(info.month);
+        prevMonths = p ? [p] : [];
+        prevLabel = p ? p.replace('-', '年') + '月' : '';
+    } else if (info.period === 'year' && info.year) {
+        const py = String(Number(info.year) - 1);
+        prevMonths = returnMonths().filter(m => m.slice(0, 4) === py);
+        prevLabel = `${py}年`;
+    }
+
+    const setText = (id, v) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = formatCurrency(v);
+        el.classList.toggle('income', v > 0);
+        el.classList.toggle('expense', v < 0);
+    };
+    const label = document.getElementById('retPeriodLabel');
+    const monthsWithData = returnMonths().length;
+    let periodValue = cur.total;
+    if (info.period === 'all') {
+        if (label) label.textContent = '月均收益';
+        periodValue = monthsWithData ? Math.round((total / monthsWithData) * 100) / 100 : 0;
+    } else {
+        if (label) label.textContent = info.period === 'year' ? '本年收益' : '本月收益';
+    }
+    setText('retPeriodAmount', periodValue);
+    setText('retTotalAmount', total);
+    setText('retYearAmount', info.period === 'year' ? cur.total : yearTotal);
+
+    const hint = document.getElementById('retPeriodHint');
+    if (hint) {
+        if (info.period === 'all') hint.textContent = monthsWithData ? `按 ${monthsWithData} 个月平均` : '';
+        else hint.textContent = info.months.length ? info.title : '该期未记录';
+    }
+    const prevEl = document.getElementById('retPrevAmount');
+    if (prevEl) {
+        if (prevMonths.length) {
+            const pv = returnSummary(prevMonths).total;
+            prevEl.textContent = formatCurrency(pv);
+            prevEl.classList.toggle('income', pv > 0);
+            prevEl.classList.toggle('expense', pv < 0);
+        } else {
+            prevEl.textContent = '—';
+            prevEl.classList.remove('income', 'expense');
+        }
+    }
+    const momEl = document.getElementById('retMomHint');
+    if (momEl) {
+        if (prevMonths.length) {
+            const diff = cur.total - returnSummary(prevMonths).total;
+            momEl.textContent = `${prevLabel} 环比 ${diff >= 0 ? '+' : ''}${formatCurrency(diff)}`;
+        } else {
+            momEl.textContent = '没有上一期数据';
+        }
+    }
+    const monthsHint = document.getElementById('retMonthsHint');
+    if (monthsHint) monthsHint.textContent = returnMonths().length ? `共 ${returnMonths().length} 个月有记录` : '';
+
+    renderReturnChart();
+    renderReturnBreakdown(info);
+    renderReturnMonthly();
+    renderReturnMemberBar();
+    updateReturnToggleStates();
+}
+
+function updateReturnToggleStates() {
+    document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retChart === state.returnChartType));
+    document.querySelectorAll('#view-returns [data-ret-gran]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retGran === activeReturnGran()));
+}
+
+function returnShowEmpty(msg) {
+    const empty = document.getElementById('returnChartEmpty');
+    const canvas = document.getElementById('returnChart');
+    if (empty) { empty.textContent = msg; empty.classList.remove('hidden'); }
+    if (canvas) canvas.parentElement.classList.add('hidden');
+    if (charts.returns) { charts.returns.destroy(); charts.returns = null; }
+}
+
+function returnHideEmpty() {
+    const empty = document.getElementById('returnChartEmpty');
+    const canvas = document.getElementById('returnChart');
+    if (empty) empty.classList.add('hidden');
+    if (canvas) canvas.parentElement.classList.remove('hidden');
+}
+
+function renderReturnChart() {
+    const info = returnPeriodInfo();
+    const title = document.getElementById('retChartTitle');
+    const sub = document.getElementById('retChartSubtitle');
+    const chartType = state.returnChartType;
+    const gran = activeReturnGran();
+    if (title) title.textContent = chartType === 'pie' ? '账户收益构成' : (gran === 'year' ? '年度收益' : '月度收益');
+    if (sub) sub.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
+
+    if (!returnMonths().length) {
+        returnShowEmpty('还没有记录过收益，点右上角「记收益」开始');
+        return;
+    }
+    const token = ++returnRenderToken;
+    requestAnimationFrame(() => {
+        if (token !== returnRenderToken) return;
+        const ctx = document.getElementById('returnChart');
+        if (!ctx) return;
+        if (chartType === 'pie') renderReturnPie(ctx, info);
+        else renderReturnTrend(ctx, chartType);
+    });
+}
+
+function renderReturnTrend(ctx, chartType) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderReturnTrend(ctx, chartType)).catch(() => {}); return; }
+    if (charts.returns) { charts.returns.destroy(); charts.returns = null; }
+    const buckets = returnTrendBuckets();
+    const values = buckets.map(b => Math.round(returnSummary(b.months).total * 100) / 100);
+    const palette = chartPalette();
+    if (!buckets.length) { returnShowEmpty('该期间没有收益记录'); return; }
+    returnHideEmpty();
+    const accent = values.map(v => v < 0 ? '#ff3b30' : '#34c759');
+
+    charts.returns = new Chart(ctx, {
+        type: chartType,
+        data: {
+            labels: buckets.map(b => b.label),
+            datasets: [{
+                label: '收益',
+                data: values,
+                borderColor: '#34c759',
+                backgroundColor: chartType === 'line' ? 'rgba(52,199,89,0.12)' : accent,
+                borderWidth: chartType === 'line' ? 2 : 0,
+                fill: chartType === 'line',
+                tension: 0.3,
+                pointRadius: buckets.length > 24 ? 0 : 3,
+                pointHoverRadius: 6,
+                pointBackgroundColor: '#34c759',
+                borderRadius: 5,
+                maxBarThickness: 40,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (evt, elements) => {
+                if (!elements || !elements.length) return;
+                const b = returnTrendBuckets()[elements[0].index];
+                if (b) openReturnDetailForPeriod(b.months, b.label);
+            },
+            onHover: (evt, elements) => {
+                const target = evt.native && evt.native.target;
+                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (c) => `收益: ${formatCurrency(c.raw)}` } },
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: palette.text, font: { size: 10, family: '-apple-system' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+                },
+                y: {
+                    grid: { color: palette.grid },
+                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) },
+                },
+            },
+        },
+    });
+}
+
+function renderReturnPie(ctx, info) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderReturnPie(ctx, info)).catch(() => {}); return; }
+    if (charts.returns) { charts.returns.destroy(); charts.returns = null; }
+    const { byAccount } = returnSummary(info.months);
+    const rows = returnCandidateAccounts().map(a => ({
+        id: a.id, name: a.name, color: a.color, amount: byAccount[a.id] || 0,
+    })).filter(r => r.amount !== 0).map(r => ({ ...r, signed: Math.abs(r.amount) }));
+    if (!rows.length) { returnShowEmpty('该期没有可统计的收益数据'); return; }
+    rows.sort((x, y) => y.signed - x.signed);
+    const entries = topPieEntries(rows);
+    const gross = entries.reduce((s, e) => s + e.signed, 0);
+    const net = entries.reduce((s, e) => s + e.amount, 0);
+    returnHideEmpty();
+
+    charts.returns = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: entries.map(e => e.name || accountById(e.id)?.name || '未知'),
+            datasets: [{
+                data: entries.map(e => e.signed),
+                backgroundColor: entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.amount < 0 ? '#ff3b30' : (e.color || '#34c759'))),
+                borderWidth: 0, hoverOffset: 10,
+                radius: (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520 ? '68%' : '100%',
+            }],
+        },
+        plugins: [pieLabelPlugin, doughnutTotalPlugin],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '52%',
+            layout: { padding: { left: 28, right: 28, top: 10, bottom: 10 } },
+            onClick: (evt, elements) => {
+                if (!elements || !elements.length) return;
+                const e = entries[elements[0].index];
+                if (e) openReturnHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.name);
+            },
+            onHover: (evt, elements) => {
+                const target = evt.native && evt.native.target;
+                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (c) => {
+                            const e = entries[c.dataIndex];
+                            const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
+                            return `${c.label}: ${formatCurrency(e ? e.amount : c.raw)} (${pct}%)`;
+                        },
+                    },
+                },
+            },
+        },
+    });
+    charts.returns.$centerText = { label: '本期净收益', value: formatCurrency(net) };
+}
+
+function renderReturnBreakdown(info) {
+    const container = document.getElementById('retBreakdownList');
+    if (!container) return;
+    const title = document.getElementById('retBreakdownTitle');
+    if (title) title.textContent = `账户收益排行 · ${info.title}`;
+    const { byAccount } = returnSummary(info.months);
+    const rows = returnCandidateAccounts().map(a => ({
+        id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
+    })).filter(r => r.amount !== 0).sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+    if (!rows.length) {
+        container.innerHTML = '<div class="breakdown-empty">该期还没有收益记录</div>';
+        return;
+    }
+    container.innerHTML = rows.map(r => {
+        const pct = total ? Math.abs(r.amount / total) * 100 : 0;
+        return `
+        <div class="breakdown-item" onclick="openReturnHistoryForAccount('${r.id}')">
+            <div class="breakdown-icon" style="background:${r.color}22;color:${r.color}"><i class="fa-solid ${r.icon}"></i></div>
+            <div class="breakdown-main">
+                <div class="breakdown-head">
+                    <span class="breakdown-name">${r.name}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+                </div>
+                <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#ff3b30' : r.color}"></div></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderReturnMonthly() {
+    const body = document.getElementById('retMonthlyBody');
+    if (!body) return;
+    const months = returnMonths().slice().reverse();   // 最新在前
+    if (!months.length) {
+        body.innerHTML = '<tr><td colspan="4" class="breakdown-empty">还没有收益记录，点右上角「记收益」添加</td></tr>';
+        return;
+    }
+    // 累计要按时间正序累加
+    const asc = returnMonths();
+    const running = {};
+    let acc = 0;
+    asc.forEach(m => { acc += returnSummary([m]).total; running[m] = acc; });
+
+    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
+    let html = months.map((m, i) => {
+        const cur = returnSummary([m]).total;
+        const prevMonth = previousMonthOf(m);
+        const prev = prevMonth && returnMonthHasRecords(prevMonth) ? returnSummary([prevMonth]).total : null;
+        const delta = prev === null ? null : cur - prev;
+        return `
+        <tr class="bs-row" onclick="openReturnDetailForMonth('${m}')">
+            <td class="bs-label">${m.replace('-', '年')}月</td>
+            <td>${money(cur, cur >= 0 ? 'income' : 'expense')}</td>
+            <td>${money(running[m])}</td>
+            <td>${delta === null ? '<span class="bs-num">—</span>' : money(delta, delta >= 0 ? 'income' : 'expense')}</td>
+        </tr>`;
+    }).join('');
+    const totalAll = returnSummary(asc).total;
+    html += `
+        <tr class="bs-total">
+            <td class="bs-label">合计</td>
+            <td>${money(totalAll, totalAll >= 0 ? 'income' : 'expense')}</td>
+            <td>${money(totalAll)}</td>
+            <td><span class="bs-num">—</span></td>
+        </tr>`;
+    body.innerHTML = html;
+}
+
+// ---- 某期各账户明细（复用账户历史弹窗的 DOM）----
+function openReturnDetailForPeriod(months, label) {
+    if (!months || !months.length) return;
+    returnHistoryAccountId = null;
+    const { byAccount } = returnSummary(months);
+    const rows = returnCandidateAccounts().map(a => ({
+        id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
+    })).filter(r => r.amount !== 0).sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+
+    const iconEl = document.getElementById('acctHistIcon');
+    if (iconEl) {
+        iconEl.style.background = 'var(--accent-light)';
+        iconEl.style.color = 'var(--accent)';
+        iconEl.innerHTML = '<i class="fa-solid fa-arrow-trend-up"></i>';
+    }
+    const t = document.getElementById('acctHistTitle');
+    if (t) t.textContent = `${label} 收益明细`;
+    const s = document.getElementById('acctHistSub');
+    if (s) s.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
+    const del = document.getElementById('acctHistDelete');
+    if (del) del.style.display = 'none';
+    const sum = document.getElementById('acctHistSummary');
+    if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item">涉及 <b>${rows.length}</b> 个账户</span>`;
+    const list = document.getElementById('acctHistList');
+    if (list) list.innerHTML = rows.length ? rows.map(r => `
+        <div class="breakdown-item" onclick="closeAccountHistoryModal();openReturnHistoryForAccount('${r.id}')">
+            <div class="breakdown-icon" style="background:${r.color}22;color:${r.color}"><i class="fa-solid ${r.icon}"></i></div>
+            <div class="breakdown-main">
+                <div class="breakdown-head">
+                    <span class="breakdown-name">${r.name}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+                </div>
+            </div>
+        </div>`).join('') : '<div class="breakdown-empty">该期没有收益记录</div>';
+    const modal = document.getElementById('accountHistoryModal');
+    if (modal) { modal.classList.remove('hidden'); raiseOverlay('accountHistoryModal'); }
+}
+
+function openReturnDetailForMonth(month) {
+    openReturnDetailForPeriod([month], month.replace('-', '年') + '月');
+}
+
+// ---- 单账户收益历史 ----
+function openReturnHistoryForAccount(accountId, label) {
+    if (!accountId) return;
+    const a = accountById(accountId);
+    if (!a) return;
+    returnHistoryAccountId = accountId;
+    historyAccountId = null;
+    const iconEl = document.getElementById('acctHistIcon');
+    if (iconEl) {
+        iconEl.style.background = `${a.color}22`;
+        iconEl.style.color = a.color;
+        iconEl.innerHTML = `<i class="fa-solid ${a.icon}"></i>`;
+    }
+    const t = document.getElementById('acctHistTitle');
+    if (t) t.textContent = label || a.name;
+    const s = document.getElementById('acctHistSub');
+    if (s) s.textContent = '收益历史';
+    const del = document.getElementById('acctHistDelete');
+    if (del) del.style.display = 'none';
+    renderReturnAccountHistory();
+    const modal = document.getElementById('accountHistoryModal');
+    if (modal) { modal.classList.remove('hidden'); raiseOverlay('accountHistoryModal'); }
+}
+
+function renderReturnAccountHistory() {
+    const rows = state.returns
+        .filter(r => r.accountId === returnHistoryAccountId && (state.balanceOwner === 'all' || r.member === state.balanceOwner))
+        .slice()
+        .sort((x, y) => y.month.localeCompare(x.month) || String(x.member).localeCompare(String(y.member)));
+    const all = state.returns.filter(r => r.accountId === returnHistoryAccountId);
+    const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const sum = document.getElementById('acctHistSummary');
+    if (sum) sum.innerHTML = `
+        <span class="cat-txn-summary-item">共 <b>${[...new Set(rows.map(r => r.month))].length}</b> 期</span>
+        <span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">累计 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item">最新 <b>${rows.length ? formatCurrency(rows[0].amount) : '—'}</b></span>`;
+    const list = document.getElementById('acctHistList');
+    if (list) list.innerHTML = rows.length ? rows.map(r => `
+        <div class="bal-history-row">
+            <span class="bh-month">${r.month.replace('-', '年')}月${state.balanceOwner === 'all' ? `<span class="bh-member">${_esc(r.member || '')}</span>` : ''}</span>
+            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+            <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
+        </div>`).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
+}
+
+function deleteReturnSnapshot(id) {
+    if (!confirm('删除这一期的收益记录？')) return;
+    addTombstone('returns', id);
+    state.returns = state.returns.filter(r => r.id !== id);
+    saveState();
+    renderReturnAccountHistory();
+    renderReturns();
+    showToast('已删除该期收益', 'success');
+}
+
+// ---------------- 记收益弹窗 ----------------
+function openReturnModal(month) {
+    const info = returnPeriodInfo();
+    const input = document.getElementById('returnMonthInput');
+    if (input) input.value = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const ms = document.getElementById('returnMemberSelect');
+    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
+    renderReturnEntry();
+    const modal = document.getElementById('returnModal');
+    if (modal) { modal.classList.remove('hidden'); raiseOverlay('returnModal'); }
+}
+
+function closeReturnModal() {
+    const modal = document.getElementById('returnModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function renderReturnEntry() {
+    const monthInput = document.getElementById('returnMonthInput');
+    if (!monthInput) return;
+    const month = monthInput.value;
+    const ms = document.getElementById('returnMemberSelect');
+    if (ms) {
+        const want = ms.value || state.balanceMembers[0] || '本人';
+        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
+    }
+    const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
+    const sub = document.getElementById('returnModalSub');
+    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月各账户收益` : '请先选择月份';
+    const list = document.getElementById('returnEntryList');
+    if (!list) return;
+    const accounts = returnCandidateAccounts();
+    if (!accounts.length) {
+        list.innerHTML = '<div class="breakdown-empty">还没有资产账户，先到「资产负债」里添加</div>';
+        return;
+    }
+    const existing = returnsAtMonth(month, member);
+    list.innerHTML = accounts.map(a => `
+        <div class="bal-entry-row">
+            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
+            <div class="be-name">${a.name}<span class="be-kind asset">${a.group || '资产'}</span></div>
+            <div class="be-input">
+                <span class="currency-symbol">${state.settings.currency}</span>
+                <input type="number" step="0.01" class="text-input be-field" data-account="${a.id}"
+                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
+            </div>
+        </div>`).join('');
+}
+
+function clearReturnInputs() {
+    document.querySelectorAll('#returnEntryList .be-field').forEach(inp => { inp.value = ''; });
+}
+
+function saveReturns() {
+    const monthInput = document.getElementById('returnMonthInput');
+    const month = monthInput ? monthInput.value : '';
+    if (!month) { showToast('请选择月份', 'error'); return; }
+    const ms = document.getElementById('returnMemberSelect');
+    const member = (ms && ms.value) || state.balanceMembers[0] || '本人';
+    let saved = 0;
+    document.querySelectorAll('#returnEntryList .be-field').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const amount = parseFloat(raw);
+        if (!isFinite(amount)) return;
+        const accountId = inp.dataset.account;
+        const id = _rebalanceId(member, accountId, month);
+        const existing = state.returns.find(r => r.id === id);
+        if (existing) {
+            if (existing.amount === amount) return;
+            existing.amount = amount;
+            existing.updatedAt = Date.now();
+        } else {
+            state.returns.push({ id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+        }
+        saved += 1;
+    });
+    if (!saved) { showToast('没有需要保存的收益', 'error'); return; }
+    flushState();
+    closeReturnModal();
+    state.returnPeriod = 'month';
+    const [y, m] = month.split('-').map(Number);
+    state.returnYear = y;
+    state.returnMonth = m;
+    state.returnGran = null;
+    document.querySelectorAll('[data-ret-period]').forEach(b => b.classList.toggle('active', b.dataset.retPeriod === 'month'));
+    renderReturns();
+    showToast(`已保存 ${saved} 个账户的收益`, 'success');
+}
+
+function initReturnListeners() {
+    document.querySelectorAll('[data-ret-period]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.returnPeriod = btn.dataset.retPeriod;
+            state.returnGran = null;
+            document.querySelectorAll('[data-ret-period]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderReturns();
+        });
+    });
+    document.querySelectorAll('#view-returns [data-ret-chart]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnChartType(btn.dataset.retChart));
+    });
+    document.querySelectorAll('#view-returns [data-ret-gran]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnGran(btn.dataset.retGran));
+    });
+    const ySel = document.getElementById('returnYearSelect');
+    if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });
+    const mSel = document.getElementById('returnMonthSelect');
+    if (mSel) mSel.addEventListener('change', e => { state.returnMonth = parseInt(e.target.value); renderReturns(); });
+    const rMonthInput = document.getElementById('returnMonthInput');
+    if (rMonthInput) rMonthInput.addEventListener('change', renderReturnEntry);
+    const rMemberSel = document.getElementById('returnMemberSelect');
+    if (rMemberSel) rMemberSel.addEventListener('change', renderReturnEntry);
 }
 
 // ---- Event Listeners ----
@@ -4545,6 +5271,9 @@ function initEventListeners() {
 
     // 四笔钱
     initFundListeners();
+
+    // 投资收益
+    initReturnListeners();
 
     // Report year/month selectors
     document.getElementById('reportYearSelect').addEventListener('change', (e) => {

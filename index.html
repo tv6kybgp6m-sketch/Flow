@@ -55,7 +55,11 @@
                         <i class="fa-solid fa-chart-pie"></i>
                         <span>四笔钱</span>
                     </a>
-                    <a class="nav-item" data-view="budget">
+                    <a class="nav-item" data-view="returns">
+                        <i class="fa-solid fa-arrow-trend-up"></i>
+                        <span>投资收益</span>
+                    </a>
+                    <a class="nav-item nav-item-desktop-only" data-view="budget">
                         <i class="fa-solid fa-wallet"></i>
                         <span>预算管理</span>
                     </a>
@@ -392,6 +396,99 @@
                     </div>
                 </section>
 
+                <!-- Investment Returns View -->
+                <section class="view" id="view-returns">
+                    <div class="view-header">
+                        <h1>投资收益</h1>
+                        <div class="report-controls">
+                            <div class="report-period">
+                                <button class="period-btn active" data-ret-period="month">月报</button>
+                                <button class="period-btn" data-ret-period="year">年报</button>
+                                <button class="period-btn" data-ret-period="all">总</button>
+                            </div>
+                            <div class="report-period-picker" id="returnYearWrap">
+                                <select class="filter-select" id="returnYearSelect"></select>
+                            </div>
+                            <div class="report-period-picker" id="returnMonthWrap">
+                                <select class="filter-select" id="returnMonthSelect"></select>
+                            </div>
+                            <button class="primary-btn" onclick="openReturnModal()">
+                                <i class="fa-solid fa-plus"></i> 记收益
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bal-member-bar" id="retMemberBar"></div>
+                    <div class="report-summary">
+                        <div class="report-card">
+                            <div class="report-card-top"><span class="report-label" id="retPeriodLabel">本月收益</span></div>
+                            <span class="report-value" id="retPeriodAmount">0</span>
+                            <div class="bal-asof" id="retPeriodHint"></div>
+                        </div>
+                        <div class="report-card">
+                            <div class="report-card-top"><span class="report-label">上月收益</span></div>
+                            <span class="report-value" id="retPrevAmount">0</span>
+                            <div class="bal-asof" id="retMomHint"></div>
+                        </div>
+                        <div class="report-card">
+                            <div class="report-card-top"><span class="report-label">本年收益</span></div>
+                            <span class="report-value" id="retYearAmount">0</span>
+                        </div>
+                        <div class="report-card">
+                            <div class="report-card-top"><span class="report-label">累计收益</span></div>
+                            <span class="report-value" id="retTotalAmount">0</span>
+                            <div class="bal-asof" id="retMonthsHint"></div>
+                        </div>
+                    </div>
+                    <div class="chart-card drill-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3 id="retChartTitle">月度收益</h3>
+                                <span class="chart-subtitle" id="retChartSubtitle"></span>
+                            </div>
+                            <div class="drill-controls">
+                                <div class="drill-toggle" id="retGranularity">
+                                    <button class="gran-btn" data-ret-gran="month">按月</button>
+                                    <button class="gran-btn" data-ret-gran="year">按年</button>
+                                </div>
+                                <div class="drill-toggle chart-type-toggle">
+                                    <button class="type-ico-btn" data-ret-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
+                                    <button class="type-ico-btn" data-ret-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
+                                    <button class="type-ico-btn" data-ret-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chart-container tall">
+                            <canvas id="returnChart"></canvas>
+                        </div>
+                        <div class="drill-chart-empty hidden" id="returnChartEmpty"></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3 id="retBreakdownTitle">账户收益排行</h3>
+                                <span class="chart-subtitle" id="retBreakdownHint">点击账户查看历史收益</span>
+                            </div>
+                        </div>
+                        <div class="breakdown-list" id="retBreakdownList"></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>每月收益情况</h3>
+                                <span class="chart-subtitle" id="retMonthlyHint">点击月份查看各账户明细</span>
+                            </div>
+                        </div>
+                        <div class="bill-stats-wrap">
+                            <table class="bill-stats">
+                                <thead>
+                                    <tr><th>月份</th><th>本期收益</th><th>累计收益</th><th>环比</th></tr>
+                                </thead>
+                                <tbody id="retMonthlyBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Budget View -->
                 <section class="view" id="view-budget">
                     <div class="view-header">
@@ -484,6 +581,8 @@
                                     <option value="transactions">交易记录</option>
                                     <option value="reports">报表分析</option>
                                     <option value="balance">资产负债</option>
+                                    <option value="funds">四笔钱</option>
+                                    <option value="returns">投资收益</option>
                                     <option value="budget">预算管理</option>
                                 </select>
                             </div>
@@ -498,6 +597,12 @@
                                 <div class="settings-label">分类管理</div>
                                 <button class="secondary-btn" onclick="switchView('categories')">
                                     <i class="fa-solid fa-tags"></i> 管理
+                                </button>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">预算管理<div class="settings-sublabel">移动端导航已收起，从这里进入</div></div>
+                                <button class="secondary-btn" onclick="switchView('budget')">
+                                    <i class="fa-solid fa-wallet"></i> 管理
                                 </button>
                             </div>
                         </div>
@@ -539,7 +644,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.12.0</div>
+                                    <div class="about-version">版本 1.13.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -738,6 +843,38 @@
             </div>
         </div>
 
+        <!-- Investment Return Entry Modal -->
+        <div class="modal-overlay hidden" id="returnModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>记录投资收益</h2>
+                        <div class="cat-txn-sub" id="returnModalSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeReturnModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>成员</label>
+                        <select class="text-input" id="returnMemberSelect"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>归属月份</label>
+                        <input type="month" class="text-input" id="returnMonthInput">
+                    </div>
+                    <div class="bal-entry-actions">
+                        <button class="secondary-btn" onclick="clearReturnInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
+                        <span class="ret-tip">亏损填负数，留空表示不记</span>
+                    </div>
+                    <div id="returnEntryList" class="balance-entry-list"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn" onclick="closeReturnModal()">取消</button>
+                    <button class="primary-btn" onclick="saveReturns()"><i class="fa-solid fa-check"></i> 保存</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Balance Entry Modal -->
         <div class="modal-overlay hidden" id="balanceModal">
             <div class="modal balance-modal">
@@ -852,7 +989,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.12.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.13.0').catch(() => {});
             });
         }
     </script>
