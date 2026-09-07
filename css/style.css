@@ -3353,6 +3353,13 @@ table.bill-stats {
 .ret-tip { font-size: 12px; color: var(--text-tertiary); align-self: center; margin-left: auto; }
 .bh-amount.income { color: var(--income); }
 .bh-amount.expense { color: var(--expense); }
+.add-account-inline {
+    width: 100%; margin-top: 10px; padding: 10px;
+    border: 1px dashed var(--border-strong); border-radius: 10px;
+    background: none; color: var(--accent); font-family: var(--font);
+    font-size: 13px; cursor: pointer;
+}
+.add-account-inline:active { background: var(--bg-card-hover); }
 
 @media (max-width: 640px) {
     .bm-chip { font-size: 12px; padding: 4px 12px; }

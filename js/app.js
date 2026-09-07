@@ -4075,6 +4075,10 @@ function deleteAccountFromList(id) {
 
 function refreshAccountLists() {
     if (state.currentView === 'balance') renderBalance();
+    if (state.currentView === 'returns') renderReturns();
+    // 记收益弹窗开着时，新增/删除账户要立刻反映到列表里
+    const retModal = document.getElementById('returnModal');
+    if (retModal && !retModal.classList.contains('hidden')) renderReturnEntry();
 }
 
 function initBalanceListeners() {
@@ -4566,13 +4570,15 @@ function returnMonthHasRecords(month) {
     return !!month && state.returns.some(r => r.month === month);
 }
 
-// 只列用户真正持有的资产账户（记过余额或记过收益），一个都没有就退回全部资产账户
+// 只列用户真正持有的资产账户（记过余额/收益），但用户自己新建的账户一律列出——
+// 否则刚加的账户还没有任何记录，出现在弹窗里的话会像是没生效。
 function returnCandidateAccounts() {
+    const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
     const held = new Set();
     state.balances.forEach(b => held.add(b.accountId));
     state.returns.forEach(r => held.add(r.accountId));
     const assets = state.accounts.filter(a => a.kind === 'asset');
-    const picked = assets.filter(a => held.has(a.id));
+    const picked = assets.filter(a => held.has(a.id) || !defaultIds.has(a.id));
     return picked.length ? picked : assets;
 }
 
