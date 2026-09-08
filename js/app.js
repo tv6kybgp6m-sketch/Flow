@@ -222,6 +222,34 @@ function flushState() {
     saveStateNow();
 }
 
+// 保存一份生成的文件。桌面版 WKWebView 不认 <a download> 那套（点了没反应），
+// 必须交给原生「存储」面板；浏览器里仍用 object URL 下载。
+// 返回 true 表示用户取消了保存。
+function saveGeneratedFile(blob, filename) {
+    if (isElectron() && window.electronAPI && typeof window.electronAPI.saveFile === 'function') {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const base64 = String(reader.result).split(',')[1] || '';
+                window.electronAPI.saveFile({ name: filename, base64 })
+                    .then(saved => resolve(saved === 'cancelled'))
+                    .catch(() => { showToast('保存失败', 'error'); resolve(true); });
+            };
+            reader.onerror = () => { showToast('读取数据失败', 'error'); resolve(true); };
+            reader.readAsDataURL(blob);
+        });
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return Promise.resolve(false);
+}
+
 function saveStateNow() {
     const data = {
         transactions: state.transactions,
@@ -631,18 +659,13 @@ function exportToICloud() {
         },
     };
     const blob = new Blob([JSON.stringify(syncData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `accounting-sync.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    iCloudLastSyncTime = Date.now();
-    updateICloudSyncUI();
-    markExported();
-    showToast('已导出同步文件，请保存到 iCloud Drive', 'success');
+    saveGeneratedFile(blob, 'accounting-sync.json').then(cancelled => {
+        if (cancelled) return;
+        iCloudLastSyncTime = Date.now();
+        updateICloudSyncUI();
+        markExported();
+        showToast('已导出同步文件，请保存到 iCloud Drive', 'success');
+    });
 }
 
 // PWA: Import from iCloud (file input)
@@ -3090,20 +3113,15 @@ function exportData() {
         ws3['!cols'] = [{wch:20},{wch:14}];
         XLSX.utils.book_append_sheet(wb, ws3, '预算');
 
-        // Use XLSX.write to generate binary, then download via Blob
+        // Use XLSX.write to generate binary, then hand it to the save path
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `记账本-${formatDateFull(new Date().toISOString())}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 500);
-
-        markExported();
-        showToast('数据已导出为 Excel (.xlsx)', 'success');
+        return saveGeneratedFile(blob, `记账本-${formatDateFull(new Date().toISOString())}.xlsx`)
+            .then(cancelled => {
+                if (cancelled) return;
+                markExported();
+                showToast('数据已导出为 Excel (.xlsx)', 'success');
+            });
     } catch (err) {
         console.error('Export error:', err);
         showToast('导出失败: ' + err.message, 'error');
