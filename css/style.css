@@ -3361,6 +3361,15 @@ table.bill-stats {
 }
 .add-account-inline:active { background: var(--bg-card-hover); }
 
+/* ---- 云同步设置 ---- */
+.settings-row-stack {
+    flex-direction: column; align-items: stretch; gap: 8px;
+}
+.rs-inline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rs-inline .text-input { flex: 1 1 auto; min-width: 0; }
+.rs-inline .secondary-btn { flex: 0 0 auto; white-space: nowrap; }
+.secondary-btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
+
 @media (max-width: 640px) {
     .bm-chip { font-size: 12px; padding: 4px 12px; }
     .ret-tip { font-size: 11px; margin-left: 0; }

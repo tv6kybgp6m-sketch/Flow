@@ -609,6 +609,10 @@
                                 </button>
                             </div>
                         </div>
+                        <div class="settings-section">
+                            <h3>云同步</h3>
+                            <div id="remoteSyncSection"></div>
+                        </div>
                         <div class="settings-section" id="dataMgmtSection">
                             <h3>数据管理</h3>
                             <div class="settings-row">
@@ -647,7 +651,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.15.1</div>
+                                    <div class="about-version">版本 1.16.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -995,7 +999,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.15.1').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.16.0').catch(() => {});
             });
         }
     </script>

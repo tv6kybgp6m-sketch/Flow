@@ -272,7 +272,10 @@ function saveStateNow() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
     // Trigger iCloud sync (debounced)
-    if (!__suppressSyncSchedule) scheduleICloudSync();
+    if (!__suppressSyncSchedule) {
+        scheduleICloudSync();
+        scheduleRemoteSync();
+    }
 }
 
 // ---- Modal stacking ----
@@ -453,32 +456,36 @@ async function initICloudSync() {
     }
 }
 
+// 同步文档的统一结构：iCloud 通道和云同步通道共用，避免两边字段漂移
+function buildSyncPayload() {
+    return {
+        version: 1,
+        lastModified: Date.now(),
+        deviceName: isElectron() ? ('Mac-' + DEVICE_ID.slice(-4)) : 'iPhone',
+        deviceId: DEVICE_ID,
+        data: {
+            transactions: state.transactions,
+            categories: state.categories,
+            budgets: state.budgets,
+            paymentMethods: state.paymentMethods,
+            accounts: state.accounts,
+            balances: state.balances,
+            returns: state.returns,
+            fundTargets: state.fundTargets,
+            insuranceMembers: state.insuranceMembers,
+            insurancePolicies: state.insurancePolicies,
+            settings: state.settings,
+            deleted: state.deleted,
+            pmAddedAt: state.pmAddedAt,
+        },
+    };
+}
+
 async function syncToICloud() {
     if (!iCloudSyncEnabled || !isElectron()) return;
 
     try {
-        const syncData = {
-            version: 1,
-            lastModified: Date.now(),
-            deviceName: isElectron() ? ('Mac-' + DEVICE_ID.slice(-4)) : 'iPhone',
-            deviceId: DEVICE_ID,
-            data: {
-                transactions: state.transactions,
-                categories: state.categories,
-                budgets: state.budgets,
-                paymentMethods: state.paymentMethods,
-                accounts: state.accounts,
-                balances: state.balances,
-                returns: state.returns,
-                fundTargets: state.fundTargets,
-                insuranceMembers: state.insuranceMembers,
-                insurancePolicies: state.insurancePolicies,
-                settings: state.settings,
-                deleted: state.deleted,
-                pmAddedAt: state.pmAddedAt,
-            },
-        };
-        await window.electronAPI.icloud.writeData(syncData);
+        await window.electronAPI.icloud.writeData(buildSyncPayload());
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
     } catch (e) {
@@ -767,6 +774,314 @@ async function syncFromICloudNow() {
         showToast('同步失败', 'error');
     }
 }
+
+// ==================== 云同步（私密 GitHub Gist）====================
+// iPhone 上的 PWA 读不到 iCloud Drive，所以跨平台走一个「设备都拿得到」的中转：
+// 一个私密 Gist 存同一份账本 JSON。iPhone / Mac / 浏览器都直接和 api.github.com
+// 通信（它开了 CORS），不需要自建服务器；token 只存在各设备本地，不进同步内容。
+
+const GIST_API = 'https://api.github.com';
+const GIST_FILENAME = 'bookkeeping-sync.json';
+const REMOTE_SYNC_KEY = 'bookkeeping_remote_sync';
+const REMOTE_POLL_MS = 60000;
+const GIST_SIZE_LIMIT = 900 * 1024;          // GitHub 单文件上限约 1MB，留余量
+
+let remoteSyncCfg = { enabled: false, token: '', gistId: '', lastSyncAt: 0 };
+let __remotePushTimer = null;
+let __remotePollTimer = null;
+let __remoteVisibilityHooked = false;
+let __remoteBusy = false;
+let __lastPushedFingerprint = null;
+let __remoteLastError = '';
+
+function loadRemoteSyncConfig() {
+    try {
+        const raw = localStorage.getItem(REMOTE_SYNC_KEY);
+        if (raw) remoteSyncCfg = Object.assign(remoteSyncCfg, JSON.parse(raw));
+    } catch (e) { /* 首次或损坏，用默认值 */ }
+    if (typeof remoteSyncCfg.enabled !== 'boolean') remoteSyncCfg.enabled = false;
+}
+
+function saveRemoteSyncConfig() {
+    try { localStorage.setItem(REMOTE_SYNC_KEY, JSON.stringify(remoteSyncCfg)); } catch (e) {}
+}
+
+function remoteSyncReady() {
+    return !!(remoteSyncCfg.enabled && remoteSyncCfg.token && remoteSyncCfg.gistId);
+}
+
+function remoteErrorText(status) {
+    if (status === 401) return 'Token 无效或已过期，请重新填写';
+    if (status === 403) return '被 GitHub 拒绝（多为访问频率超限，或 token 缺少 gist 权限）';
+    if (status === 404) return '找不到该同步库：Gist ID 不对，或 token 没有 gist 读取权限';
+    return '请求失败（HTTP ' + status + '）';
+}
+
+async function gistApi(path, method, body) {
+    const init = {
+        method: method || 'GET',
+        cache: 'no-store',
+        headers: {
+            'Authorization': 'Bearer ' + remoteSyncCfg.token,
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'bookkeeping-app',
+        },
+    };
+    if (body !== undefined) {
+        init.headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(body);
+    }
+    try {
+        const res = await fetch(GIST_API + path, init);
+        const scopes = res.headers.get('x-oauth-scopes');
+        if (res.status === 204) return { status: 204, body: null, scopes };
+        const json = await res.json().catch(() => null);
+        return { status: res.status, body: json, scopes };
+    } catch (e) {
+        return { status: 0, body: null, networkError: true };
+    }
+}
+
+// 校验 token 是否可用。注意：只缺 gist 权限的 classic token 访问 /gists 依然返回
+// 200 + 空列表，光看状态码会误判成功，所以必须看 X-OAuth-Scopes。
+async function remoteValidateToken() {
+    const r = await gistApi('/gists?per_page=1');
+    if (r.networkError) { __remoteLastError = '网络不通，检查是否能访问 api.github.com'; return false; }
+    if (r.status === 401 || r.status === 403) { __remoteLastError = remoteErrorText(r.status); return false; }
+    if (r.status !== 200) { __remoteLastError = remoteErrorText(r.status); return false; }
+    if (typeof r.scopes === 'string' && r.scopes && !/(^|,)\s*gist\s*(,|$)/i.test(r.scopes)) {
+        __remoteLastError = '这个 Token 没有 gist 权限（现有权限：' + r.scopes + '）。请在 GitHub 上新建一个只勾选 gist 的 Token';
+        return false;
+    }
+    __remoteLastError = '';
+    return true;
+}
+
+// 一键新建私密 Gist 作为同步库
+async function remoteCreateGist() {
+    if (!remoteSyncCfg.token) { showToast('请先填写 Token', 'error'); return false; }
+    const r = await gistApi('/gists', 'POST', {
+        description: '记账本云同步（自动生成，请勿手动编辑）',
+        public: false,
+        files: { [GIST_FILENAME]: { content: JSON.stringify(buildSyncPayload()) } },
+    });
+    if ((r.status === 201 || r.status === 200) && r.body && r.body.id) {
+        remoteSyncCfg.gistId = r.body.id;
+        remoteSyncCfg.enabled = true;
+        remoteSyncCfg.lastSyncAt = Date.now();
+        __lastPushedFingerprint = syncFingerprint();
+        saveRemoteSyncConfig();
+        updateRemoteSyncUI();
+        showToast('同步库已创建', 'success');
+        return true;
+    }
+    __remoteLastError = remoteErrorText(r.status);
+    updateRemoteSyncUI();
+    showToast(__remoteLastError, 'error');
+    return false;
+}
+
+function gistLedgerFile(gist) {
+    const files = (gist && gist.files) || {};
+    if (files[GIST_FILENAME]) return files[GIST_FILENAME];
+    const first = Object.keys(files)[0];
+    return first ? files[first] : null;
+}
+
+async function remotePullAndMerge() {
+    const r = await gistApi('/gists/' + encodeURIComponent(remoteSyncCfg.gistId));
+    if (r.networkError) { __remoteLastError = '网络不通'; return false; }
+    if (r.status !== 200) { __remoteLastError = remoteErrorText(r.status); return false; }
+    __remoteLastError = '';
+    const file = gistLedgerFile(r.body);
+    if (!file || !file.content) return false;            // 空库，稍后把本地推上去
+    let remoteData = null;
+    try { remoteData = JSON.parse(file.content); } catch (e) { __remoteLastError = '云端内容不是有效 JSON'; return false; }
+    if (!remoteData || !remoteData.data) return false;
+    const changed = mergeRemoteData(remoteData);
+    if (changed) {
+        renderView(state.currentView);
+        updateSidebarSummary();
+    }
+    __lastPushedFingerprint = syncFingerprint();          // 拉下来的状态即视为已同步基线
+    return true;
+}
+
+async function remotePush() {
+    const payload = buildSyncPayload();
+    const text = JSON.stringify(payload);
+    if (text.length > GIST_SIZE_LIMIT) {
+        __remoteLastError = '账本太大（超过 ' + Math.round(GIST_SIZE_LIMIT / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
+        return false;
+    }
+    const r = await gistApi('/gists/' + encodeURIComponent(remoteSyncCfg.gistId), 'PATCH', {
+        files: { [GIST_FILENAME]: { content: text } },
+    });
+    if (r.networkError) { __remoteLastError = '网络不通'; return false; }
+    if (r.status !== 200) { __remoteLastError = remoteErrorText(r.status); return false; }
+    __remoteLastError = '';
+    __lastPushedFingerprint = syncFingerprint();
+    remoteSyncCfg.lastSyncAt = Date.now();
+    saveRemoteSyncConfig();
+    return true;
+}
+
+// 一次完整同步：先拉后推。串行加锁，避免定时器叠起来。
+async function remoteSyncCycle(reason) {
+    if (!remoteSyncReady() || __remoteBusy) return false;
+    __remoteBusy = true;
+    try {
+        const pulled = await remotePullAndMerge();
+        if (!pulled && __remoteLastError) return false;
+        const ok = await remotePush();
+        if (ok && reason === 'manual') showToast('已同步到云端', 'success');
+        return ok;
+    } finally {
+        __remoteBusy = false;
+        updateRemoteSyncUI();
+    }
+}
+
+// 本地数据有改动后延迟推送（复用 saveState 的调用点）
+function scheduleRemoteSync() {
+    if (!remoteSyncReady()) return;
+    if (__remotePushTimer) clearTimeout(__remotePushTimer);
+    __remotePushTimer = setTimeout(() => {
+        __remotePushTimer = null;
+        if (syncFingerprint() === __lastPushedFingerprint) return;   // 内容没变就别白传一次
+        remoteSyncCycle('auto');
+    }, 6000);
+}
+
+function startRemotePolling() {
+    if (__remotePollTimer) clearInterval(__remotePollTimer);
+    __remotePollTimer = setInterval(() => {
+        if (!remoteSyncReady()) return;
+        if (document.visibilityState && document.visibilityState !== 'visible') return;  // 后台不打扰
+        remoteSyncCycle('poll');
+    }, REMOTE_POLL_MS);
+
+    if (!__remoteVisibilityHooked) {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && remoteSyncReady()) remoteSyncCycle('foreground');
+        });
+        __remoteVisibilityHooked = true;
+    }
+}
+
+async function remoteManualSync() {
+    if (!remoteSyncReady()) { showToast('请先开启云同步并填好 Token / 同步库', 'error'); return; }
+    showToast('正在同步…', 'info');
+    await remoteSyncCycle('manual');
+}
+
+async function remoteToggleEnabled(on) {
+    remoteSyncCfg.enabled = !!on;
+    saveRemoteSyncConfig();
+    if (on && remoteSyncCfg.token && !remoteSyncCfg.gistId) {
+        const ok = await remoteValidateToken();
+        if (!ok) showToast(__remoteLastError, 'error');
+    }
+    if (on) remoteSyncCycle('enable');
+    updateRemoteSyncUI();
+}
+
+function remoteSaveToken(value) {
+    remoteSyncCfg.token = (value || '').trim();
+    saveRemoteSyncConfig();
+    updateRemoteSyncUI();
+}
+
+function remoteSaveGistId(value) {
+    // 允许直接粘 Gist 链接，自动抽出 id
+    const m = (value || '').trim().match(/([0-9a-f]{20,})/i);
+    remoteSyncCfg.gistId = m ? m[1] : (value || '').trim();
+    saveRemoteSyncConfig();
+    updateRemoteSyncUI();
+}
+
+async function remoteTestConnection() {
+    showToast('正在校验…', 'info');
+    const ok = await remoteValidateToken();
+    if (ok) {
+        if (!remoteSyncCfg.gistId) {
+            showToast('Token 可用，点「新建同步库」即可开始', 'success');
+        } else {
+            const done = await remoteSyncCycle('manual');
+            showToast(done ? '连接正常，已同步' : (__remoteLastError || '同步未完成'), done ? 'success' : 'error');
+        }
+    } else {
+        showToast(__remoteLastError || 'Token 校验失败', 'error');
+    }
+    updateRemoteSyncUI();
+}
+
+function updateRemoteSyncUI() {
+    const box = document.getElementById('remoteSyncSection');
+    if (!box) return;
+    const esc = (s) => String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const on = !!remoteSyncCfg.enabled;
+    const ready = remoteSyncReady();
+    let statusLine;
+    if (!on) statusLine = '未开启';
+    else if (!remoteSyncCfg.token) statusLine = '需要填写 Token';
+    else if (!remoteSyncCfg.gistId) statusLine = 'Token 已填，点「新建同步库」开始';
+    else if (__remoteLastError) statusLine = '⚠ ' + __remoteLastError;
+    else statusLine = remoteSyncCfg.lastSyncAt
+        ? '上次同步 ' + new Date(remoteSyncCfg.lastSyncAt).toLocaleString('zh-CN', { hour12: false })
+        : '已就绪，尚未同步';
+
+    box.innerHTML = `
+        <div class="settings-row">
+            <div class="settings-label">开启云同步<div class="settings-sublabel">iPhone / Mac / 电脑浏览器共用同一本账</div></div>
+            <label class="ios-toggle">
+                <input type="checkbox" id="remoteSyncToggle" ${on ? 'checked' : ''}>
+                <span class="ios-toggle-slider"></span>
+            </label>
+        </div>
+        <div class="settings-row settings-row-stack">
+            <div class="settings-label">GitHub Token<div class="settings-sublabel">只需要 gist 权限；只存在这台设备上，不会上传</div></div>
+            <div class="rs-inline">
+                <input type="password" class="text-input" id="remoteSyncToken" placeholder="github_pat_… 或 ghp_…"
+                       autocomplete="off" spellcheck="false" value="${esc(remoteSyncCfg.token)}">
+                <button class="secondary-btn" id="remoteSyncTestBtn"><i class="fa-solid fa-plug"></i> 校验</button>
+            </div>
+        </div>
+        <div class="settings-row settings-row-stack">
+            <div class="settings-label">同步库<div class="settings-sublabel">私密 Gist 的 ID，多台设备填同一个即可</div></div>
+            <div class="rs-inline">
+                <input type="text" class="text-input" id="remoteSyncGist" placeholder="留空则点右边新建"
+                       autocomplete="off" spellcheck="false" value="${esc(remoteSyncCfg.gistId)}">
+                <button class="secondary-btn" id="remoteSyncCreateBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> 新建同步库</button>
+            </div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">状态<div class="settings-sublabel">${statusLine}</div></div>
+            <button class="secondary-btn" id="remoteSyncNowBtn" ${ready ? '' : 'disabled'}>
+                <i class="fa-solid fa-rotate"></i> 立即同步
+            </button>
+        </div>`;
+
+    const toggle = document.getElementById('remoteSyncToggle');
+    if (toggle) toggle.addEventListener('change', e => remoteToggleEnabled(e.target.checked));
+    const token = document.getElementById('remoteSyncToken');
+    if (token) token.addEventListener('change', e => remoteSaveToken(e.target.value));
+    const gist = document.getElementById('remoteSyncGist');
+    if (gist) gist.addEventListener('change', e => remoteSaveGistId(e.target.value));
+    const testBtn = document.getElementById('remoteSyncTestBtn');
+    if (testBtn) testBtn.addEventListener('click', () => { remoteSaveToken((token && token.value) || ''); remoteTestConnection(); });
+    const createBtn = document.getElementById('remoteSyncCreateBtn');
+    if (createBtn) createBtn.addEventListener('click', async () => {
+        remoteSaveToken((token && token.value) || '');
+        remoteSaveGistId((gist && gist.value) || '');
+        if (!remoteSyncCfg.token) { showToast('请先填写 Token', 'error'); return; }
+        if (remoteSyncCfg.gistId) { remoteSyncCfg.enabled = true; saveRemoteSyncConfig(); await remoteSyncCycle('manual'); return; }
+        await remoteCreateGist();
+    });
+    const nowBtn = document.getElementById('remoteSyncNowBtn');
+    if (nowBtn) nowBtn.addEventListener('click', remoteManualSync);
+}
+
 
 function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -3038,6 +3353,7 @@ function renderSettings() {
     const autoToggle = document.getElementById('autoOpenAddToggle');
     if (autoToggle) autoToggle.checked = !!state.settings.autoOpenAdd;
     updateICloudSyncUI();
+    updateRemoteSyncUI();
     renderBackupBanner();
 }
 
@@ -5440,6 +5756,7 @@ function initEventListeners() {
 
 // ---- Init ----
 async function init() {
+    loadRemoteSyncConfig();
     loadState();
     pruneTombstones();
     applyTombstones();
@@ -5479,6 +5796,10 @@ async function init() {
 
     // Initialize iCloud sync (web/PWA has no native bridge, this just renders the manual UI)
     if (!isElectron()) setTimeout(() => initICloudSync(), 500);
+
+    // 云同步（Gist）：iPhone / Mac / 浏览器共用同一本账
+    startRemotePolling();                       // 未配置时内部直接跳过
+    if (remoteSyncReady()) setTimeout(() => remoteSyncCycle('startup'), 1200);
 }
 
 document.addEventListener('DOMContentLoaded', init);
