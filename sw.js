@@ -1,8 +1,9 @@
-const CACHE_NAME = 'bookkeeping-v1.24.0';
+const CACHE_NAME = 'bookkeeping-v1.28.0';
 const PRECACHE = [
   './',
   './index.html',
   './css/style.css',
+  './js/ledger-crypto.js',
   './js/app.js',
   './js/xlsx.full.min.js',
   './vendor/chart.umd.min.js',

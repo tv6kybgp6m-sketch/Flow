@@ -2,6 +2,9 @@
    记账本 Bookkeeping - App Logic
    ============================================ */
 
+// 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
+const APP_VERSION = '1.28.0';
+
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
 // <head>, so the phone had to parse and execute ~1MB of JS before painting the
@@ -792,7 +795,7 @@ async function initICloudSync() {
         });
 
         // On startup, pull from iCloud and merge
-        const remoteData = await window.electronAPI.icloud.readData();
+        const remoteData = await resolveCloudPayload(await window.electronAPI.icloud.readData());
         if (remoteData && remoteData.data) {
             mergeRemoteData(remoteData);
         }
@@ -837,7 +840,10 @@ async function syncToICloud() {
     if (!iCloudSyncEnabled || !isElectron()) return;
 
     try {
-        await window.electronAPI.icloud.writeData(buildSyncPayload());
+        const payload = buildSyncPayload();
+        const envelope = await buildCloudEnvelope(payload);
+        if (LedgerCrypto.isEnabled() && !envelope) return;      // 拿不到密钥就这次不写云，绝不退回明文
+        await window.electronAPI.icloud.writeData(payload, envelope);
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
     } catch (e) {
@@ -845,13 +851,41 @@ async function syncToICloud() {
     }
 }
 
-function handleICloudFileChange(remoteData) {
-    if (!remoteData || !remoteData.data) return;
-    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
-    if (remoteData.deviceId && remoteData.deviceId === DEVICE_ID) return;
-    if (!remoteData.deviceId && remoteData.deviceName === 'Mac' && isElectron()) return;
+// 云端那份：先压缩再加密；lastModified 放在封套顶层，Mac 端靠它挑最新文件
+async function buildCloudEnvelope(payload) {
+    if (!LedgerCrypto.isEnabled()) return null;
+    try {
+        await ensureUnlocked(LedgerCrypto.keyring(), '云同步需要解锁');
+    } catch (e) {
+        __remoteLastError = '加密已开启但本机未解锁：' + ((e && e.message) || e);
+        return null;
+    }
+    const env = await LedgerCrypto.encryptString(await encodeSyncPayload(payload || buildSyncPayload()));
+    env.lastModified = Date.now();
+    return env;
+}
 
-    const changed = mergeRemoteData(remoteData);
+// 云端读回来的东西可能是密文，统一还原成同步载荷；没开加密时原样返回
+async function resolveCloudPayload(raw) {
+    if (!raw) return null;
+    if (!LedgerCrypto.looksEncrypted(raw)) return raw;
+    try {
+        await ensureUnlocked(raw.keyring, '读取云端数据');
+        return await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
+    } catch (e) {
+        __remoteLastError = '云端数据需要口令：' + ((e && e.message) || e);
+        return null;
+    }
+}
+
+async function handleICloudFileChange(remoteData) {
+    const data = await resolveCloudPayload(remoteData);
+    if (!data || !data.data) return;
+    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
+    if (data.deviceId && data.deviceId === DEVICE_ID) return;
+    if (!data.deviceId && data.deviceName === 'Mac' && isElectron()) return;
+
+    const changed = mergeRemoteData(data);
     if (!changed) return;                 // 对端只是回写了一份和这里相同的内容
     renderView(state.currentView);
     showToast('已从 iCloud 同步最新数据', 'success');
@@ -1013,18 +1047,31 @@ function mergeRemoteData(remoteData) {
 // filename 决定落盘名字：iCloud 通道必须用 Mac 端读取的那个固定名字。
 const ICLOUD_SYNC_FILENAME = 'bookkeeping-sync.json';
 
-function exportSyncJSON(filename, toastText) {
+async function exportSyncJSON(filename, toastText) {
     const syncData = buildSyncPayload();
     syncData.deviceName = isElectron() ? 'Mac-backup' : 'browser-backup';
-    const blob = new Blob([JSON.stringify(syncData, null, 2)], { type: 'application/json' });
     const stamp = new Date().toISOString().slice(0, 10);
     const name = filename || `记账本-备份-${stamp}.json`;
+    let text = JSON.stringify(syncData, null, 2);
+    let encrypted = false;
+    if (LedgerCrypto.isEnabled()) {
+        try {
+            await ensureUnlocked(LedgerCrypto.keyring(), '导出需要解锁');
+            const env = await LedgerCrypto.encryptString(text);
+            text = JSON.stringify(env, null, 2);
+            encrypted = true;
+        } catch (e) {
+            if (e && e.message !== '已取消') showToast('加密失败：' + e.message, 'error');
+            return false;
+        }
+    }
+    const blob = new Blob([text], { type: 'application/json' });
     return saveGeneratedFile(blob, name).then(cancelled => {
         if (cancelled) return false;
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
         markExported();
-        showToast(toastText || '已导出 JSON 备份', 'success');
+        showToast(toastText || (encrypted ? '已导出加密备份' : '已导出 JSON 备份'), 'success');
         return true;
     });
 }
@@ -1032,6 +1079,290 @@ function exportSyncJSON(filename, toastText) {
 // 存到 iCloud Drive 的「记账本」文件夹时请用这个名字，Mac 端按它读取
 function exportToICloud() {
     return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹');
+}
+
+// ---------------- 加密解锁：口令 / 恢复码输入 ----------------
+let __secretResolve = null;
+
+function askSecret(opts) {
+    const o = opts || {};
+    return new Promise(resolve => {
+        __secretResolve = resolve;
+        document.getElementById('secretTitle').textContent = o.title || '输入加密口令';
+        document.getElementById('secretHint').textContent = o.hint || '';
+        const inp = document.getElementById('secretInput');
+        inp.value = '';
+        inp.type = 'password';
+        const peek = document.getElementById('secretPeek');
+        if (peek) peek.checked = false;
+        if (!inp.dataset.bound) {
+            inp.dataset.bound = '1';
+            inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitSecretModal(); });
+        }
+        if (peek && !peek.dataset.bound) {
+            peek.dataset.bound = '1';
+            peek.addEventListener('change', () => {
+                document.getElementById('secretInput').type = peek.checked ? 'text' : 'password';
+            });
+        }
+        showSecretError(o.error || '');
+        document.getElementById('secretModal').classList.remove('hidden');
+        raiseOverlay('secretModal');
+        setTimeout(() => { try { inp.focus(); } catch (e) { /* 拿不到焦点就算了 */ } }, 80);
+    });
+}
+function showSecretError(msg) {
+    const el = document.getElementById('secretError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+function closeSecretModal(value) {
+    document.getElementById('secretModal').classList.add('hidden');
+    const r = __secretResolve; __secretResolve = null;
+    if (r) r(value);
+}
+function submitSecretModal() {
+    const v = document.getElementById('secretInput').value;
+    if (!v) { showSecretError('请输入内容'); return; }
+    closeSecretModal(v);
+}
+
+// 有本机密钥就静默通过；没有就问到口令或恢复码（最多三次）
+async function ensureUnlocked(kring, why) {
+    if (await LedgerCrypto.hasLocalKey()) return true;
+    const kr = kring || LedgerCrypto.keyring();
+    const hint = kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。';
+    let lastError = '';
+    for (let i = 0; i < 3; i++) {
+        const secret = await askSecret({
+            title: (why || '解锁账本') + '：输入加密口令',
+            hint: hint + (i ? `（第 ${i + 1} / 3 次）` : ''),
+            error: lastError,
+        });
+        if (secret === null) throw new Error('已取消');
+        try {
+            await LedgerCrypto.unlock(secret, kr);
+            return true;
+        } catch (e) {
+            lastError = (e && e.message) || '口令或恢复码不正确';
+        }
+    }
+    throw new Error(lastError || '口令或恢复码不正确');
+}
+
+// ---------------- 加密设置区 ----------------
+let __encMode = 'setup';          // setup | change | showcode
+let __pendingRecoveryCode = '';
+
+function renderEncryptionSection() {
+    const box = document.getElementById('encryptionSection');
+    if (!box) return;
+    if (!LedgerCrypto.isSupported()) {
+        box.innerHTML = `<div class="settings-row"><div class="settings-label">本浏览器不支持加密
+            <div class="settings-sublabel">需要 HTTPS 或本机环境下的 WebCrypto</div></div></div>`;
+        return;
+    }
+    if (!LedgerCrypto.isEnabled()) {
+        box.innerHTML = `
+            <div class="settings-row">
+                <div class="settings-label">未开启
+                    <div class="settings-sublabel">开启后备份文件和云同步内容变成密文，只有口令或恢复码能打开。
+                        日常无感：口令只在这台设备首次解锁时输一次。</div>
+                </div>
+                <button class="secondary-btn" onclick="openEncSetup()"><i class="fa-solid fa-lock"></i> 开启加密</button>
+            </div>`;
+        return;
+    }
+    const kr = LedgerCrypto.keyring() || {};
+    box.innerHTML = `
+        <div class="settings-row">
+            <div class="settings-label">已开启
+                <div class="settings-sublabel">口令提示 <b>${_esc(kr.hint || '')}</b> ·
+                    ${LedgerCrypto.isUnlocked() ? '本机已解锁，打开不用再输' : '本机未缓存密钥，导出/同步时会询问'}<br>
+                    忘记口令没有找回通道，只能用恢复码。换设备时用同一个口令即可解开。</div>
+            </div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">修改口令<div class="settings-sublabel">只换钥匙的包装，数据不用重新加密</div></div>
+            <div class="rs-inline"><button class="secondary-btn" onclick="openEncChange()">修改口令</button></div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">恢复码<div class="settings-sublabel">不显示已保存的那一个，只能重发新的（旧的随即失效）</div></div>
+            <div class="rs-inline"><button class="secondary-btn" onclick="rotateRecoveryCodeClick()"><i class="fa-solid fa-rotate"></i> 重发恢复码</button></div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">关闭加密<div class="settings-sublabel">之后的备份与同步退回明文</div></div>
+            <div class="rs-inline"><button class="danger-btn" onclick="disableEncryptionClick()">关闭</button></div>
+        </div>`;
+}
+
+function encSetupShowError(msg) {
+    const el = document.getElementById('encSetupError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+function encSetupShowStep(step) {
+    document.getElementById('encStep1').classList.toggle('hidden', step !== 1);
+    document.getElementById('encStep2').classList.toggle('hidden', step !== 2);
+    const btn = document.getElementById('encSetupNext');
+    if (btn) btn.textContent = step === 1 ? '下一步' : '完成';
+    encSetupShowError('');
+}
+function openEncMode(mode, title, sub) {
+    __encMode = mode;
+    __pendingRecoveryCode = '';
+    document.getElementById('encSetupTitle').textContent = title;
+    document.getElementById('encSetupSub').textContent = sub || '';
+    const p1 = document.getElementById('encPass1'), p2 = document.getElementById('encPass2');
+    if (p1) p1.value = '';
+    if (p2) p2.value = '';
+    const ack = document.getElementById('encAck'); if (ack) ack.checked = false;
+    const cancel = document.querySelector('#encSetupModal .modal-footer .secondary-btn');
+    if (cancel) cancel.style.display = mode === 'showcode' ? 'none' : '';
+    encSetupShowStep(1);
+    document.getElementById('encSetupModal').classList.remove('hidden');
+    raiseOverlay('encSetupModal');
+    if (mode !== 'showcode') setTimeout(() => { try { p1.focus(); } catch (e) { /* 拿不到焦点就算了 */ } }, 80);
+}
+function openEncSetup() {
+    if (!LedgerCrypto.isSupported()) { showToast('这个浏览器不支持加密', 'error'); return; }
+    openEncMode('setup', '开启加密', '给备份和云同步加一道口令');
+}
+function openEncChange() {
+    openEncMode('change', '修改加密口令', '数据不用重新加密，只是换一把钥匙的包装');
+}
+function closeEncSetup() {
+    document.getElementById('encSetupModal').classList.add('hidden');
+    __pendingRecoveryCode = '';
+    renderEncryptionSection();
+}
+function revealRecoveryCode(code) {
+    __encMode = 'showcode';
+    __pendingRecoveryCode = code;
+    const box = document.getElementById('recoveryCodeBox');
+    if (box) box.textContent = LedgerCrypto.formatRecoveryCode(code);
+    const ack = document.getElementById('encAck'); if (ack) ack.checked = false;
+    encSetupShowStep(2);
+}
+async function encSetupAdvance() {
+    if (__encMode === 'showcode') {
+        const ack = document.getElementById('encAck');
+        if (ack && !ack.checked) return encSetupShowError('请先确认已保存恢复码');
+        closeEncSetup();
+        return;
+    }
+    const p1 = (document.getElementById('encPass1') || {}).value || '';
+    const p2 = (document.getElementById('encPass2') || {}).value || '';
+    if (p1.length < 8) return encSetupShowError('口令至少 8 位');
+    if (p1 !== p2) return encSetupShowError('两次输入不一样');
+    try {
+        if (__encMode === 'setup') {
+            const r = await LedgerCrypto.setup(p1);
+            await scheduleRemoteSync();                 // 让云端那份也尽快变成密文
+            revealRecoveryCode(r.recoveryCode);
+            showToast('加密已开启', 'success');
+        } else {
+            await LedgerCrypto.changePassphrase(null, p1);
+            await scheduleRemoteSync();
+            showToast('口令已修改', 'success');
+            closeEncSetup();
+        }
+    } catch (e) {
+        if (e && e.message === 'NEED_SECRET') {
+            // 本机没缓存密钥：先补一次解锁再试
+            try {
+                await ensureUnlocked(null, '修改口令需要先解锁');
+                await LedgerCrypto.changePassphrase(null, p1);
+                await scheduleRemoteSync();
+                showToast('口令已修改', 'success');
+                closeEncSetup();
+            } catch (e2) {
+                encSetupShowError(e2 && e2.message === '已取消' ? '已取消' : String((e2 && e2.message) || e2));
+            }
+        } else {
+            encSetupShowError((e && e.message) || '操作失败');
+        }
+    }
+}
+async function rotateRecoveryCodeClick() {
+    try {
+        await ensureUnlocked(null, '重发恢复码');
+        const code = await LedgerCrypto.rotateRecoveryCode(null);
+        openEncMode('showcode', '新的恢复码', '旧恢复码已立即失效');
+        revealRecoveryCode(code);
+        showToast('已生成新的恢复码', 'success');
+    } catch (e) {
+        if (e && e.message === '已取消') return;
+        showToast((e && e.message) || '操作失败', 'error');
+    }
+}
+function copyRecoveryCode() {
+    const text = __pendingRecoveryCode || '';
+    if (!text) return;
+    const done = () => showToast('恢复码已复制', 'success');
+    const fallback = () => {
+        const box = document.getElementById('recoveryCodeBox');
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(box);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+            const ok = document.execCommand('copy');
+            sel.removeAllRanges();
+            if (ok) done(); else showToast('复制失败，请长按选中上面的字符手动复制', 'error');
+        } catch (e) { showToast('复制失败，请长按选中手动复制', 'error'); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else fallback();
+}
+async function disableEncryptionClick() {
+    if (!confirm('关闭加密？之后的备份与同步退回明文。已经导出的加密文件仍需口令或恢复码才能打开。')) return;
+    try {
+        await LedgerCrypto.disable();
+        await scheduleRemoteSync();          // 用明文覆盖云端那份密文，免得下次没口令打不开
+        showToast('已关闭加密', 'success');
+    } catch (e) { showToast('关闭失败：' + (e && e.message || e), 'error'); }
+    renderEncryptionSection();
+}
+
+// ---------------- 检查更新 ----------------
+// 导航走 cache-first + 后台刷新，所以过去要"开两次"才换新，看起来像更新失败。
+// 这里给一个手动入口：强制 worker 重新检查，并把状态说清楚。
+async function checkForUpdate() {
+    const hint = document.getElementById('updateHint');
+    const say = (t) => { if (hint) hint.textContent = t; };
+    if (!('serviceWorker' in navigator)) {
+        say('这个环境没有离线缓存，刷新页面即可');
+        showToast('没有离线缓存，刷新页面即可', 'info');
+        return;
+    }
+    say('正在检查…');
+    let reg = null;
+    try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { reg = null; }
+    if (!reg) {
+        say('尚未启用离线缓存');
+        showToast('尚未启用离线缓存，刷新页面即可', 'info');
+        return;
+    }
+    try { await reg.update(); } catch (e) { /* 网络不通下面按状态说明 */ }
+    await new Promise(r => setTimeout(r, 1500));
+    const running = ((reg.active && reg.active.scriptURL) || '').replace(/^.*[?&]v=/, '');
+    if (reg.installing) {
+        say(`正在下载新版本 v${APP_VERSION}…`);
+        showToast('发现新版本，正在下载', 'info');
+    } else if (reg.waiting) {
+        say('新版本已就绪，即将自动重新加载');
+        showToast('新版本已就绪', 'success');
+    } else if (running && running !== APP_VERSION) {
+        say(`当前离线包 v${running}，未能更新，请彻底退出后重开`);
+        showToast('更新没走通，请彻底退出后再打开', 'error');
+    } else {
+        say(`已是最新 v${APP_VERSION} · ${relTimeText(Date.now())}`);
+        showToast('已经是最新版本', 'success');
+    }
 }
 
 // ---- 备份历史（桌面版由 App 自动留版本；浏览器里没有本地归档）----
@@ -1084,9 +1415,20 @@ function openBackupFolderClick() {
 }
 
 // 把一份 JSON 备份合并进当前账本
-function applyImportedJSON(text) {
+async function applyImportedJSON(text) {
     let parsed = null;
     try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    if (LedgerCrypto.looksEncrypted(parsed)) {
+        let plain = null;
+        try {
+            await ensureUnlocked(parsed.keyring, '这份备份是加密的');
+            plain = await LedgerCrypto.decryptEnvelope(parsed);
+        } catch (e) {
+            showToast(e && e.message === '已取消' ? '已取消导入' : '导入失败：' + (e && e.message || e), 'error');
+            return false;
+        }
+        return applyImportedJSON(plain);
+    }
     if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
     mergeRemoteData(parsed);
     applyTheme(state.settings.theme);
@@ -1176,11 +1518,14 @@ function updateICloudSyncUI() {
 async function syncFromICloudNow() {
     if (!isElectron() || !iCloudSyncEnabled) return;
     try {
-        const remoteData = await window.electronAPI.icloud.readData();
+        const raw = await window.electronAPI.icloud.readData();
+        const remoteData = await resolveCloudPayload(raw);
         if (remoteData && remoteData.data) {
             mergeRemoteData(remoteData);
             renderView(state.currentView);
             showToast('已从 iCloud 同步最新数据', 'success');
+        } else if (LedgerCrypto.looksEncrypted(raw)) {
+            showToast('云端那份是加密的，需要口令或恢复码', 'error');
         } else {
             showToast('iCloud 中暂无同步数据', 'info');
         }
@@ -1353,9 +1698,21 @@ async function remotePullAndMerge() {
     const file = gistLedgerFile(r.body);
     if (!file || !file.content) return false;            // 空库，稍后把本地推上去
     let remoteData = null;
-    try { remoteData = await decodeSyncPayload(file.content); }
+    try {
+        let raw = null;
+        const trimmed = String(file.content).trim();
+        if (trimmed.charAt(0) === '{' && trimmed.indexOf(ENC_MAGIC) >= 0) {
+            try { raw = JSON.parse(trimmed); } catch (e) { raw = null; }
+        }
+        remoteData = raw !== null && LedgerCrypto.looksEncrypted(raw)
+            ? await resolveCloudPayload(raw)
+            : await decodeSyncPayload(file.content);
+    }
     catch (e) { __remoteLastError = '云端内容无法解析：' + ((e && e.message) || '格式错误'); return false; }
-    if (!remoteData || !remoteData.data) return false;
+    if (!remoteData || !remoteData.data) {
+        if (LedgerCrypto.isEnabled() && !__remoteLastError) __remoteLastError = '云端那份是加密的，本机解不开';
+        return false;
+    }
     const changed = mergeRemoteData(remoteData);
     if (changed) {
         renderView(state.currentView);
@@ -1367,10 +1724,17 @@ async function remotePullAndMerge() {
 
 async function remotePush() {
     const payload = buildSyncPayload();
-    const text = await encodeSyncPayload(payload);
+    let text;
+    if (LedgerCrypto.isEnabled()) {
+        const env = await buildCloudEnvelope(payload);
+        if (!env) return false;                       // 未解锁：宁可不同步，也不推明文
+        text = JSON.stringify(env);
+    } else {
+        text = await encodeSyncPayload(payload);
+    }
     // 上限判断用"编码后"长度：压缩让 1MB 账本降到约 130KB，不至于被误判放不下
     if (text.length > GIST_SIZE_LIMIT) {
-        __remoteLastError = '账本太大（压缩后仍 ' + Math.round(text.length / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
+        __remoteLastError = '账本太大（编码后仍 ' + Math.round(text.length / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
         return false;
     }
     const r = await gistApi('/gists/' + encodeURIComponent(remoteSyncCfg.gistId), 'PATCH', {
@@ -3799,8 +4163,8 @@ function initCategoryInteractions() {
 }
 
 // ---- Settings ----
-// 备份提醒：超过 30 天没导出过就在设置页顶部提示；数据为空时不打扰
-const BACKUP_REMIND_DAYS = 30;
+// 备份提醒：超过 7 天没备份就在设置页顶部提示；数据为空时不打扰
+const BACKUP_REMIND_DAYS = 7;
 
 function markExported() {
     state.lastExportAt = Date.now();
@@ -3808,18 +4172,35 @@ function markExported() {
     renderBackupBanner();
 }
 
-function renderBackupBanner() {
+async function renderBackupBanner() {
     const banner = document.getElementById('backupBanner');
     if (!banner) return;
+    const hide = () => { banner.classList.add('hidden'); banner.innerHTML = ''; };
     const hasData = state.transactions.length > 0 || state.balances.length > 0 || state.returns.length > 0;
-    if (!hasData) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
+    if (!hasData) return hide();
+
+    // Mac 版：每次改动都会留一份本机快照，开了 iCloud 就等于已经在异地备份了，不用提醒
+    let cloud = false, hasSnapshot = false;
+    if (isElectron() && window.electronAPI && typeof window.electronAPI.listBackups === 'function') {
+        try {
+            const info = await window.electronAPI.listBackups();
+            hasSnapshot = !!((info && info.snapshots || []).length);
+            cloud = !!(info && info.cloudAvailable);
+        } catch (e) { /* 读不到就按网页版处理 */ }
+    }
+    if (hasSnapshot && cloud) return hide();
+
     const days = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / 86400000) : null;
-    if (days !== null && days < BACKUP_REMIND_DAYS) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
+    if (days !== null && days < BACKUP_REMIND_DAYS) return hide();
+
+    const where = hasSnapshot
+        ? 'Mac 版没开 iCloud 同步，快照只存在这台电脑上，硬盘坏了就一起没了。'
+        : '数据只存在这台设备的浏览器里，清缓存或换设备会丢失，';
     banner.classList.remove('hidden');
     banner.innerHTML = `
         <div class="bb-text">
             <i class="fa-solid fa-triangle-exclamation"></i>
-            <span>${days === null ? '你还没有导出过备份' : `已经 ${days} 天没有备份了`}。数据只存在这台设备的浏览器里，清缓存或换设备会丢失，建议定期导出一份。</span>
+            <span>${days === null ? '你还没有导出过备份' : `已经 ${days} 天没有备份了`}。${where}建议每 ${BACKUP_REMIND_DAYS} 天导出一份存到别处。</span>
         </div>
         <button class="secondary-btn" onclick="document.getElementById('dataMgmtSection').scrollIntoView({behavior:'smooth'})"><i class="fa-solid fa-download"></i> 去备份</button>`;
 }
@@ -3838,6 +4219,10 @@ function renderSettings() {
     renderBackupBanner();
     renderBackupHistory();
     renderRecurringSection();
+    renderEncryptionSection();
+    // 版本号以代码里的常量为准，避免和 index.html 里的静态文字对不上
+    const av = document.querySelector('.about-version');
+    if (av) av.textContent = '版本 ' + APP_VERSION;
 }
 
 function applyTheme(theme) {
@@ -5910,6 +6295,142 @@ let returnHistoryAccountId = null;
 function returnMonths() { return [...new Set(state.returns.map(r => r.month))].sort(); }
 function returnYears() { return [...new Set(returnMonths().map(m => m.slice(0, 4)))].sort(); }
 
+// ==================== 收益率（组合口径，Modified Dietz）====================
+// 数据结构为"以后按账户看收益率"预留：每条收益记录可带一个 flow（本月净入金），
+// 留空表示未录。账户级收益率只是把这里的组合算法按 accountId 再切一刀，不必改结构。
+
+// 哪些账户算"投资账户"：沿用四笔钱的归类（稳健理财 + 长期投资），
+// 现金/房产/车辆/公积金算收益率没意义，还会被存取款严重扭曲。
+function investmentAccountIds() {
+    const includeCash = !!(state.settings && state.settings.returnIncludeCash);
+    const wanted = includeCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth'];
+    // 房产/车辆虽然归在"长期投资"，但市值几百万、收益基本不录，混进来只会把收益率摊平成 0
+    const includeFixed = !!(state.settings && state.settings.returnIncludeFixed);
+    return state.accounts.filter(a => a.kind === 'asset' && wanted.includes(a.bucket)
+        && (includeFixed || a.group !== '固定资产')).map(a => a.id);
+}
+
+// 某月的组合三要素：期初市值、期末市值、本期收益、已录净入金。
+// 铁律：只有"本金已知"的账户才进收益率。本金已知 = 上月记过余额，或本月录了净入金。
+// 否则分子带着收益、分母却是 0，收益率会虚高到离谱：账户里本来有 10 万、只记了本月余额，
+// 赚 5000 会被算成 9.5%。这类账户从分子和分母同时剔除（收益金额照记，只是不参与算率）。
+function portfolioMonthStats(month, ids, draft, memberOverride) {
+    const scope = ids || investmentAccountIds();
+    const member = memberOverride || state.balanceOwner;
+    const prev = previousMonthOf(month);
+    const prevMap = prev ? balancesAtMonth(prev, member) : {};
+    const curMap = balancesAtMonth(month, member);
+    const retMap = returnsAtMonth(month, member);
+
+    // 每个账户的净入金（留空 = 未录）
+    const flowOf = {}, flowKnownOf = {};
+    state.returns.forEach(r => {
+        if (r.month !== month || !scope.includes(r.accountId)) return;
+        if (member !== 'all' && r.member !== member) return;
+        if (r.flow === undefined || r.flow === null || r.flow === '') return;
+        flowOf[r.accountId] = (flowOf[r.accountId] || 0) + (Number(r.flow) || 0);
+        flowKnownOf[r.accountId] = true;
+    });
+
+    // 弹窗实时预览：用未保存的草稿覆盖某个账户的收益 / 净入金
+    if (draft) Object.keys(draft).forEach(id => {
+        const d = draft[id] || {};
+        if ('profit' in d) {
+            if (d.profit === '' || d.profit === null || d.profit === undefined) delete retMap[id];
+            else retMap[id] = Number(d.profit) || 0;
+        }
+        if ('flow' in d) {
+            if (d.flow === '' || d.flow === null || d.flow === undefined) {
+                delete flowOf[id]; delete flowKnownOf[id];
+            } else {
+                flowOf[id] = Number(d.flow) || 0; flowKnownOf[id] = true;
+            }
+        }
+    });
+
+    const eligible = [], unknown = [];
+    scope.forEach(id => {
+        (prevMap[id] !== undefined || flowKnownOf[id]) ? eligible.push(id) : unknown.push(id);
+    });
+    const sum = (map) => eligible.reduce((s, id) => s + (Number(map[id]) || 0), 0);
+
+    const v1 = sum(curMap);
+    const v0 = sum(prevMap);
+    const profit = sum(retMap);
+    const hasProfit = eligible.some(id => retMap[id] !== undefined && retMap[id] !== null);
+    const flowKnown = eligible.some(id => flowKnownOf[id]);
+    const flow = sum(flowOf);
+
+    // 分母：录了入金用 Modified Dietz（期初 + 入金的一半，当作月中进出）；
+    // 没录就退化成"期初期末平均"。期初为 0 又没录入金时钱是本月才进来的，
+    // 平均本金会凭空少一半，所以宁可不给数字，也绝不给一个假的高收益率。
+    let rate = null, base = 0, reason = '';
+    if (!scope.length) reason = 'no-account';
+    else if (!eligible.length) reason = 'no-capital';
+    else if (!hasProfit) reason = 'no-profit';
+    else if (v0 <= 0 && !flowKnown) reason = 'zero-opening';
+    else {
+        base = flowKnown ? (v0 + flow / 2) : ((v0 + v1) / 2);
+        rate = base > 0 ? profit / base : null;
+        if (rate === null) reason = 'zero-base';
+    }
+
+    // 自洽校验：收益理应等于 期末 − 期初 − 净入金。差得多说明余额或收益记错了。
+    let check = null;
+    if (flowKnown && v0 > 0) {
+        const implied = v1 - v0 - flow;
+        const gap = profit - implied;
+        const tol = Math.max(1, Math.abs(v1) * 0.005);   // 0.5% 以内当四舍五入
+        if (Math.abs(gap) > tol) check = { implied, gap };
+    }
+
+    return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason };
+}
+
+// 时间加权累计收益率：逐月 (1+r) 连乘。剔掉"什么时候加钱/取钱"的影响，
+// 只留投资本身的表现，所以不同投入规模的账户可以横向比。
+function portfolioCumulative(months) {
+    const list = (months || returnMonths()).filter(m => m);
+    let acc = 1, n = 0, best = null;
+    const series = list.map(m => {
+        const st = portfolioMonthStats(m);
+        if (st.rate !== null && isFinite(st.rate)) { acc *= (1 + st.rate); n += 1; }
+        return { month: m, ...st };
+    });
+    const cumulative = n > 0 ? acc - 1 : null;
+    // 年化：按有收益率的月份数折算
+    const annualized = (cumulative !== null && n > 0)
+        ? Math.pow(1 + cumulative, 12 / n) - 1
+        : null;
+    return { series, months: n, cumulative, annualized };
+}
+
+function pctText(r, digits) {
+    if (r === null || r === undefined || !isFinite(r)) return '—';
+    return (r * 100).toFixed(digits === undefined ? 2 : digits) + '%';
+}
+
+// 单账户收益率：把组合算法按 accountId 切一刀，再逐月连乘（时间加权）。
+// 本金未知的月份（没记上月余额、也没录净入金）跳过并计数，绝不当成 0% 拖低结果。
+function accountReturnRate(accountId, months) {
+    const list = (months || []).filter(Boolean).slice().sort();
+    const res = { rate: null, months: 0, skipped: 0, series: [], latest: null };
+    if (!accountId || !list.length) return res;
+    let acc = 1;
+    list.forEach(m => {
+        const st = portfolioMonthStats(m, [accountId]);
+        if (st.rate !== null && isFinite(st.rate)) {
+            acc *= (1 + st.rate); res.months += 1;
+            res.series.push({ month: m, rate: st.rate });
+        } else if (st.reason === 'no-capital' || st.reason === 'zero-opening' || st.reason === 'zero-base') {
+            res.skipped += 1;
+        }
+    });
+    res.rate = res.months ? acc - 1 : null;
+    res.latest = res.series.length ? res.series[res.series.length - 1].rate : null;
+    return res;
+}
+
 // 某月各账户收益（按当前成员筛选；'all' = 全家相加）
 function returnsAtMonth(month, member = state.balanceOwner) {
     const map = {};
@@ -6105,7 +6626,104 @@ function renderReturns() {
     renderReturnBreakdown(info);
     renderReturnMonthly();
     renderReturnMemberBar();
+    renderReturnRates(info);
     updateReturnToggleStates();
+}
+
+// 收益率卡片：组合口径（稳健理财 + 长期投资），不是全部资产账户
+function renderReturnRates(info) {
+    const setText = (id, txt, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = txt;
+        if (cls !== undefined) {
+            el.classList.toggle('income', cls === 'up');
+            el.classList.toggle('expense', cls === 'down');
+        }
+    };
+    const ids = investmentAccountIds();
+    const cum = portfolioCumulative();
+    const cur = portfolioMonthStats(info.month, ids);
+
+    const rateCls = r => (r === null ? undefined : (r > 0 ? 'up' : (r < 0 ? 'down' : undefined)));
+    setText('retRateMonth', pctText(cur.rate), rateCls(cur.rate));
+    setText('retRateCum', pctText(cum.cumulative), rateCls(cum.cumulative));
+    setText('retRateAnnual', pctText(cum.annualized), rateCls(cum.annualized));
+
+    const mh = document.getElementById('retRateMonthHint');
+    if (mh) {
+        const REASON = {
+            'no-account': '还没有归类为稳健理财 / 长期投资的账户',
+            'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
+            'no-profit': '这个月没有收益记录',
+            'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
+            'zero-base': '本金为 0，算不出比率',
+        };
+        if (cur.rate === null) {
+            mh.textContent = REASON[cur.reason] || '暂时算不出收益率';
+        } else if (cur.unknown.length) {
+            const names = cur.unknown.map(id => (accountById(id) || {}).name).filter(Boolean);
+            mh.textContent = `本金 ${formatCurrency(cur.base)} · 未计入 ${names.join('、')}（缺上月余额）`;
+        } else {
+            mh.textContent = cur.flowKnown
+                ? `本金 ${formatCurrency(cur.base)} · 含净入金 ${formatCurrency(cur.flow)}`
+                : `平均本金 ${formatCurrency(cur.base)} · 未录入金（近似）`;
+        }
+    }
+    const ch = document.getElementById('retRateCumHint');
+    if (ch) ch.textContent = cum.months ? `按 ${cum.months} 个有收益率的月份连乘` : '';
+    const ah = document.getElementById('retRateAnnualHint');
+    if (ah) ah.textContent = cum.months && cum.months < 12 ? '不足一年，按月折算' : '';
+
+    const scope = document.getElementById('retScopeNote');
+    if (scope) {
+        const incCash = !!(state.settings && state.settings.returnIncludeCash);
+        const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
+        const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
+        const prevM = previousMonthOf(info.month);
+        const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
+        const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
+            && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
+            && !ids.includes(a.id)).map(a => a.name);
+        scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
+            + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}`
+            + (outFixed.length ? `<div class="ret-excluded">已排除固定资产：${_esc(outFixed.join('、'))}（市值大、一般不录收益）</div>` : '')
+            + (missing.length ? `<div class="ret-excluded">本金未知，暂时不算进收益率：${_esc(missing.join('、'))}`
+                + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></div>` : '')
+            + `<div class="ret-scope-toggles">`
+            + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
+            + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
+            + `</div>`;
+        const goBal = document.getElementById('retGoBalance');
+        if (goBal) goBal.addEventListener('click', () => {
+            switchView('balance');
+            openBalanceModal(prevM);
+        });
+        const t = document.getElementById('retScopeCash');
+        if (t) t.addEventListener('click', () => {
+            state.settings.returnIncludeCash = !state.settings.returnIncludeCash;
+            saveState(); renderReturns();
+        });
+        const tf = document.getElementById('retScopeFixed');
+        if (tf) tf.addEventListener('click', () => {
+            state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed;
+            saveState(); renderReturns();
+        });
+    }
+
+    const warn = document.getElementById('retCheckWarn');
+    if (warn) {
+        if (cur.check) {
+            warn.classList.remove('hidden');
+            warn.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> `
+                + `这个月对不上：你录的收益是 <b>${formatCurrency(cur.profit)}</b>，`
+                + `但按「期末 ${formatCurrency(cur.v1)} − 期初 ${formatCurrency(cur.v0)} − 净入金 ${formatCurrency(cur.flow)}」`
+                + `应该是 <b>${formatCurrency(cur.check.implied)}</b>，差 <b>${formatCurrency(cur.check.gap)}</b>。`
+                + `可能是余额或收益记错了。`;
+        } else {
+            warn.classList.add('hidden'); warn.innerHTML = '';
+        }
+    }
 }
 
 function updateReturnToggleStates() {
@@ -6285,13 +6903,17 @@ function renderReturnBreakdown(info) {
     }
     container.innerHTML = rows.map(r => {
         const pct = total ? Math.abs(r.amount / total) * 100 : 0;
+        const rr = accountReturnRate(r.id, info.months);
+        const rateTxt = rr.rate !== null ? pctText(rr.rate)
+            : (rr.skipped ? '<span class="breakdown-rate-unknown">本金未知</span>' : '');
+        const rateCls = rr.rate === null ? '' : (rr.rate > 0 ? ' income' : (rr.rate < 0 ? ' expense' : ''));
         return `
         <div class="breakdown-item" onclick="openReturnHistoryForAccount('${r.id}')">
             <div class="breakdown-icon" style="background:${r.color}22;color:${r.color}"><i class="fa-solid ${r.icon}"></i></div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${r.name}</span>
-                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
                 <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#ff3b30' : r.color}"></div></div>
             </div>
@@ -6304,14 +6926,19 @@ function renderReturnMonthly() {
     if (!body) return;
     const months = returnMonths().slice().reverse();   // 最新在前
     if (!months.length) {
-        body.innerHTML = '<tr><td colspan="4" class="breakdown-empty">还没有收益记录，点右上角「记收益」添加</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="breakdown-empty">还没有收益记录，点右上角「记收益」添加</td></tr>';
         return;
     }
     // 累计要按时间正序累加
     const asc = returnMonths();
     const running = {};
     let acc = 0;
-    asc.forEach(m => { acc += returnSummary([m]).total; running[m] = acc; });
+    const rateByMonth = {};
+    asc.forEach(m => {
+        acc += returnSummary([m]).total;
+        running[m] = acc;
+        rateByMonth[m] = portfolioMonthStats(m).rate;
+    });
 
     const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
     let html = months.map((m, i) => {
@@ -6324,6 +6951,7 @@ function renderReturnMonthly() {
             <td class="bs-label">${m.replace('-', '年')}月</td>
             <td>${money(cur, cur >= 0 ? 'income' : 'expense')}</td>
             <td>${money(running[m])}</td>
+            <td><span class="bs-num${(rateByMonth[m] || 0) > 0 ? ' income' : ((rateByMonth[m] || 0) < 0 ? ' expense' : '')}">${pctText(rateByMonth[m], 2)}</span></td>
             <td>${delta === null ? '<span class="bs-num">—</span>' : money(delta, delta >= 0 ? 'income' : 'expense')}</td>
         </tr>`;
     }).join('');
@@ -6333,6 +6961,7 @@ function renderReturnMonthly() {
             <td class="bs-label">合计</td>
             <td>${money(totalAll, totalAll >= 0 ? 'income' : 'expense')}</td>
             <td>${money(totalAll)}</td>
+            <td><span class="bs-num">${pctText(portfolioCumulative(asc).cumulative, 2)}</span></td>
             <td><span class="bs-num">—</span></td>
         </tr>`;
     body.innerHTML = html;
@@ -6361,19 +6990,26 @@ function openReturnDetailForPeriod(months, label) {
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
+    const portCum = portfolioCumulative(months);
     if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item">组合收益率 <b>${pctText(portCum.cumulative)}</b></span>
         <span class="cat-txn-summary-item">涉及 <b>${rows.length}</b> 个账户</span>`;
     const list = document.getElementById('acctHistList');
-    if (list) list.innerHTML = rows.length ? rows.map(r => `
+    if (list) list.innerHTML = rows.length ? rows.map(r => {
+        const rr = accountReturnRate(r.id, months);
+        const rateTxt = rr.rate !== null ? pctText(rr.rate) : (rr.skipped ? '本金未知' : '');
+        const rateCls = rr.rate === null ? 'breakdown-rate-unknown' : (rr.rate > 0 ? 'income' : (rr.rate < 0 ? 'expense' : ''));
+        return `
         <div class="breakdown-item" onclick="closeAccountHistoryModal();openReturnHistoryForAccount('${r.id}')">
             <div class="breakdown-icon" style="background:${r.color}22;color:${r.color}"><i class="fa-solid ${r.icon}"></i></div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${r.name}</span>
-                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate ${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
             </div>
-        </div>`).join('') : '<div class="breakdown-empty">该期没有收益记录</div>';
+        </div>`;
+    }).join('') : '<div class="breakdown-empty">该期没有收益记录</div>';
     const modal = document.getElementById('accountHistoryModal');
     if (modal) { modal.classList.remove('hidden'); raiseOverlay('accountHistoryModal'); }
 }
@@ -6413,18 +7049,26 @@ function renderReturnAccountHistory() {
         .sort((x, y) => y.month.localeCompare(x.month) || String(x.member).localeCompare(String(y.member)));
     const all = state.returns.filter(r => r.accountId === returnHistoryAccountId);
     const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const rr = accountReturnRate(returnHistoryAccountId, [...new Set(rows.map(r => r.month))]);
+    const rateTxt = rr.rate !== null ? pctText(rr.rate) : (rr.skipped ? '本金未知' : '');
     const sum = document.getElementById('acctHistSummary');
     if (sum) sum.innerHTML = `
         <span class="cat-txn-summary-item">共 <b>${[...new Set(rows.map(r => r.month))].length}</b> 期</span>
         <span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">累计 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item">收益率 <b>${rateTxt || '—'}</b></span>
         <span class="cat-txn-summary-item">最新 <b>${rows.length ? formatCurrency(rows[0].amount) : '—'}</b></span>`;
     const list = document.getElementById('acctHistList');
-    if (list) list.innerHTML = rows.length ? rows.map(r => `
+    if (list) list.innerHTML = rows.length ? rows.map(r => {
+        const m = accountReturnRate(returnHistoryAccountId, [r.month]);
+        const mTxt = m.rate !== null ? pctText(m.rate) : (m.skipped ? '本金未知' : '—');
+        const mCls = m.rate === null ? 'breakdown-rate-unknown' : (m.rate > 0 ? 'income' : (m.rate < 0 ? 'expense' : ''));
+        return `
         <div class="bal-history-row">
             <span class="bh-month">${r.month.replace('-', '年')}月${state.balanceOwner === 'all' ? `<span class="bh-member">${_esc(r.member || '')}</span>` : ''}</span>
-            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
             <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
-        </div>`).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
+        </div>`;
+    }).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
 }
 
 function deleteReturnSnapshot(id) {
@@ -6476,16 +7120,61 @@ function renderReturnEntry() {
         return;
     }
     const existing = returnsAtMonth(month, member);
-    list.innerHTML = accounts.map(a => `
-        <div class="bal-entry-row">
+    const invIds = investmentAccountIds();
+    // 净入金按「成员+账户+月份」取已有值，供账户级收益率使用
+    const flowOf = (accId) => {
+        const hit = state.returns.find(r => r.accountId === accId && r.month === month
+            && (member === 'all' ? true : r.member === member)
+            && r.flow !== undefined && r.flow !== null && r.flow !== '');
+        return hit ? hit.flow : '';
+    };
+    list.innerHTML = accounts.map(a => {
+        const needFlow = invIds.includes(a.id) || existing[a.id] !== undefined;
+        const st = needFlow ? portfolioMonthStats(month, [a.id], null, member) : null;
+        const badge = st ? `<span class="be-rate${st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : ''))}" data-account="${a.id}">${st.rate === null ? '本金未知' : pctText(st.rate)}</span>` : '';
+        return `
+        <div class="bal-entry-row ${needFlow ? 'has-flow' : ''}">
             <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${a.name}<span class="be-kind asset">${a.group || '资产'}</span></div>
+            <div class="be-name">${_esc(a.name)}${badge}<span class="be-kind asset">${_esc(a.group || '资产')}</span></div>
             <div class="be-input">
                 <span class="currency-symbol">${state.settings.currency}</span>
                 <input type="number" step="0.01" class="text-input be-field" data-account="${a.id}"
-                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
+                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="收益">
             </div>
-        </div>`).join('');
+            ${needFlow ? `<div class="be-input be-flow-input" title="本月从外部转入(+)或转出(−)；账户之间互转不用填；留空表示未录">
+                <span class="be-flow-label">净入金</span>
+                <input type="number" step="0.01" class="text-input be-flow" data-account="${a.id}"
+                       value="${flowOf(a.id)}" placeholder="0">
+            </div>` : ''}
+        </div>`;
+    }).join('');
+    bindReturnRatePreview();
+}
+
+// 边填边算：把弹窗里的未保存数值当草稿喂给收益率算法，实时更新那枚角标
+function bindReturnRatePreview() {
+    const list = document.getElementById('returnEntryList');
+    if (!list || list.dataset.previewBound === '1') return;
+    list.dataset.previewBound = '1';
+    list.addEventListener('input', () => {
+        const monthInput = document.getElementById('returnMonthInput');
+        const ms = document.getElementById('returnMemberSelect');
+        const month = monthInput ? monthInput.value : '';
+        const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
+        if (!month) return;
+        list.querySelectorAll('.be-rate').forEach(badge => {
+            const accId = badge.dataset.account;
+            const profitEl = list.querySelector(`.be-field[data-account="${CSS.escape(accId)}"]`);
+            const flowEl = list.querySelector(`.be-flow[data-account="${CSS.escape(accId)}"]`);
+            const st = portfolioMonthStats(month, [accId], {
+                [accId]: { profit: profitEl ? profitEl.value : '', flow: flowEl ? flowEl.value : '' },
+            }, member);
+            badge.textContent = st.rate === null ? '本金未知' : pctText(st.rate);
+            badge.classList.toggle('unknown', st.rate === null);
+            badge.classList.toggle('up', st.rate !== null && st.rate > 0);
+            badge.classList.toggle('down', st.rate !== null && st.rate < 0);
+        });
+    });
 }
 
 function clearReturnInputs() {
@@ -6506,13 +7195,21 @@ function saveReturns() {
         if (!isFinite(amount)) return;
         const accountId = inp.dataset.account;
         const id = _rebalanceId(member, accountId, month);
+        const flowEl = document.querySelector(`#returnEntryList .be-flow[data-account="${accountId}"]`);
+        const flowRaw = flowEl ? String(flowEl.value).trim() : '';
+        const flow = flowRaw === '' ? null : (parseFloat(flowRaw) || 0);
         const existing = state.returns.find(r => r.id === id);
         if (existing) {
-            if (existing.amount === amount) return;
+            const sameAmount = existing.amount === amount;
+            const sameFlow = (existing.flow === null || existing.flow === undefined) ? flow === null : Number(existing.flow) === flow;
+            if (sameAmount && sameFlow) return;
             existing.amount = amount;
+            if (flow !== null) existing.flow = flow; else delete existing.flow;
             existing.updatedAt = Date.now();
         } else {
-            state.returns.push({ id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+            const rec = { id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() };
+            if (flow !== null) rec.flow = flow;
+            state.returns.push(rec);
         }
         saved += 1;
     });
