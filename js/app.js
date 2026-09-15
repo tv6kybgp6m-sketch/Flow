@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.2';
+const APP_VERSION = '1.28.3';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -5404,43 +5404,88 @@ function closeAccountHistoryModal() {
     historyAccountId = null;
 }
 
-// ---------------- 记余额 / 记收益的月份下拉 ----------------
-// 原来用原生 <input type="month">：手输容易打成 "2026-9" 这种无效值，
-// 而且它在 Safari 里的高度和旁边的成员下拉框对不齐。改成纯 select。
-function monthOptionList(kind, desired) {
-    const now = new Date();
-    const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const cur = key(now);
+// ---------------- 记余额 / 记收益的「年 + 月」下拉 ----------------
+// 单个长列表要翻很久才能点到早期月份，拆成两个短下拉：年份列表短、月份固定 12 项，
+// 任意历史月份都点得到。选到当年时月份只开到本月——余额是月末快照、收益是整月
+// 结果，还没过完的月记了没意义。
+// 年份下限 = 「最早记录那一年」和「当前年往前 5 年」里更早的那个：
+// 平时至少能翻到 5 年前，记录更早则自动扩到那一年
+const MONTH_BACK_YEARS = 5;
+
+function modalYearList() {
+    const nowYear = new Date().getFullYear();
     let earliest = null;
     // 余额和收益一起看：记收益时往往正是"有余额但还没录收益"的那个月
     state.balances.concat(state.returns).forEach(r => {
-        if (r.month && (!earliest || r.month < earliest)) earliest = r.month;
+        const y = Number(String(r.month || '').slice(0, 4));
+        if (y && (!earliest || y < earliest)) earliest = y;
     });
+    const floor = Math.min(earliest || nowYear, nowYear - MONTH_BACK_YEARS);
     const list = [];
-    if (earliest) {
-        const parts = earliest.split('-').map(Number);
-        const d = new Date(parts[0], parts[1] - 1, 1);
-        while (key(d) <= cur) { list.push(key(d)); d.setMonth(d.getMonth() + 1); }
-    } else {
-        for (let i = 0; i < 24; i++) list.push(key(new Date(now.getFullYear(), now.getMonth() - i, 1)));
-    }
-    if (desired && list.indexOf(desired) < 0) list.push(desired);
-    return list.sort().reverse();          // 最新在前
+    for (let y = nowYear; y >= floor; y--) list.push(y);
+    return list;
 }
 
-function fillMonthSelect(el, kind, desired) {
-    if (!el) return;
-    el.innerHTML = monthOptionList(kind, desired)
-        .map(m => `<option value="${m}">${m.replace('-', '年')}月</option>`).join('');
+function modalMonthList(year) {
+    const now = new Date();
+    const cap = Number(year) === now.getFullYear() ? now.getMonth() + 1 : 12;
+    const list = [];
+    for (let m = cap; m >= 1; m--) list.push(m);   // 12 月在前
+    return list;
+}
+
+// clampMonth=true 用于"年份变了"：把月份收窄到该年允许的范围，而不是把范围撑大
+function paintModalMonth(prefix, ym, clampMonth) {
+    const ySel = document.getElementById(prefix + 'InYear');
+    const mSel = document.getElementById(prefix + 'InMonth');
+    if (!ySel || !mSel) return '';
+    const now = new Date();
+    let year = Number(String(ym || '').slice(0, 4)) || now.getFullYear();
+    let month = Number(String(ym || '').slice(5, 7)) || (now.getMonth() + 1);
+
+    const years = modalYearList();
+    if (years.indexOf(year) < 0) { years.push(year); years.sort((a, b) => b - a); }
+    ySel.innerHTML = years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+    ySel.value = String(year);
+
+    let months = modalMonthList(year);
+    if (months.indexOf(month) < 0) {
+        if (clampMonth) month = months[0];               // 超出该年范围就贴到最近的可选项
+        else months.push(month);                          // 补录目标月份，必须能选到
+    }
+    mSel.innerHTML = months.map(m => `<option value="${m}">${m} 月</option>`).join('');
+    mSel.value = String(month);
+    return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function getModalMonth(prefix) {
+    const ySel = document.getElementById(prefix + 'InYear');
+    const mSel = document.getElementById(prefix + 'InMonth');
+    if (!ySel || !mSel || !ySel.value || !mSel.value) return '';
+    return `${ySel.value}-${String(mSel.value).padStart(2, '0')}`;
+}
+
+function bindModalMonth(prefix, onChange) {
+    const ySel = document.getElementById(prefix + 'InYear');
+    const mSel = document.getElementById(prefix + 'InMonth');
+    if (mSel && !mSel.dataset.bound) {
+        mSel.dataset.bound = '1';
+        mSel.addEventListener('change', onChange);
+    }
+    if (ySel && !ySel.dataset.bound) {
+        ySel.dataset.bound = '1';
+        ySel.addEventListener('change', () => {
+            paintModalMonth(prefix, getModalMonth(prefix), true);
+            onChange();
+        });
+    }
 }
 
 // ---------------- 记余额弹窗 ----------------
 function openBalanceModal(month) {
     const info = balancePeriodInfo();
-    const input = document.getElementById('balanceMonthInput');
     const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    fillMonthSelect(input, 'balance', want);
-    input.value = want;
+    paintModalMonth('balance', want);
     const ms = document.getElementById('balanceMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     renderBalanceEntry();
@@ -5453,7 +5498,7 @@ function closeBalanceModal() {
 }
 
 function renderBalanceEntry() {
-    const month = document.getElementById('balanceMonthInput').value;
+    const month = getModalMonth('balance');
     const ms = document.getElementById('balanceMemberSelect');
     if (ms) {
         const want = ms.value || state.balanceMembers[0] || '本人';
@@ -5493,7 +5538,7 @@ function previousMonthOf(month) {
 }
 
 function copyLastMonthBalances() {
-    const month = document.getElementById('balanceMonthInput').value;
+    const month = getModalMonth('balance');
     const prev = previousMonthOf(month);
     if (!prev) { showToast('没有更早的记录可沿用', 'error'); return; }
     const member = (document.getElementById('balanceMemberSelect') || {}).value || state.balanceMembers[0] || '本人';
@@ -5510,7 +5555,7 @@ function clearBalanceInputs() {
 }
 
 function saveBalances() {
-    const month = document.getElementById('balanceMonthInput').value;
+    const month = getModalMonth('balance');
     if (!month) { showToast('请选择月份', 'error'); return; }
     const member = (document.getElementById('balanceMemberSelect') || {}).value || state.balanceMembers[0] || '本人';
     let saved = 0;
@@ -5697,7 +5742,7 @@ function initBalanceListeners() {
         state.balanceMonth = parseInt(e.target.value);
         renderBalance();
     });
-    document.getElementById('balanceMonthInput').addEventListener('change', renderBalanceEntry);
+    bindModalMonth('balance', renderBalanceEntry);
     const balMemberSel = document.getElementById('balanceMemberSelect');
     if (balMemberSel) balMemberSel.addEventListener('change', renderBalanceEntry);
     document.getElementById('newAccountKind').addEventListener('change', () => {
@@ -7125,9 +7170,8 @@ function deleteReturnSnapshot(id) {
 // ---------------- 记收益弹窗 ----------------
 function openReturnModal(month) {
     const info = returnPeriodInfo();
-    const input = document.getElementById('returnMonthInput');
     const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    if (input) { fillMonthSelect(input, 'return', want); input.value = want; }
+    paintModalMonth('return', want);
     const ms = document.getElementById('returnMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     renderReturnEntry();
@@ -7141,9 +7185,8 @@ function closeReturnModal() {
 }
 
 function renderReturnEntry() {
-    const monthInput = document.getElementById('returnMonthInput');
-    if (!monthInput) return;
-    const month = monthInput.value;
+    const month = getModalMonth('return');
+    if (!month) return;
     const ms = document.getElementById('returnMemberSelect');
     if (ms) {
         const want = ms.value || state.balanceMembers[0] || '本人';
@@ -7197,9 +7240,8 @@ function bindReturnRatePreview() {
     if (!list || list.dataset.previewBound === '1') return;
     list.dataset.previewBound = '1';
     list.addEventListener('input', () => {
-        const monthInput = document.getElementById('returnMonthInput');
         const ms = document.getElementById('returnMemberSelect');
-        const month = monthInput ? monthInput.value : '';
+        const month = getModalMonth('return');
         const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
         if (!month) return;
         list.querySelectorAll('.be-rate').forEach(badge => {
@@ -7222,8 +7264,7 @@ function clearReturnInputs() {
 }
 
 function saveReturns() {
-    const monthInput = document.getElementById('returnMonthInput');
-    const month = monthInput ? monthInput.value : '';
+    const month = getModalMonth('return');
     if (!month) { showToast('请选择月份', 'error'); return; }
     const ms = document.getElementById('returnMemberSelect');
     const member = (ms && ms.value) || state.balanceMembers[0] || '本人';
@@ -7286,8 +7327,7 @@ function initReturnListeners() {
     if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });
     const mSel = document.getElementById('returnMonthSelect');
     if (mSel) mSel.addEventListener('change', e => { state.returnMonth = parseInt(e.target.value); renderReturns(); });
-    const rMonthInput = document.getElementById('returnMonthInput');
-    if (rMonthInput) rMonthInput.addEventListener('change', renderReturnEntry);
+    bindModalMonth('return', renderReturnEntry);
     const rMemberSel = document.getElementById('returnMemberSelect');
     if (rMemberSel) rMemberSel.addEventListener('change', renderReturnEntry);
 }
