@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.3';
+const APP_VERSION = '1.28.4';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -5404,26 +5404,16 @@ function closeAccountHistoryModal() {
     historyAccountId = null;
 }
 
-// ---------------- 记余额 / 记收益的「年 + 月」下拉 ----------------
-// 单个长列表要翻很久才能点到早期月份，拆成两个短下拉：年份列表短、月份固定 12 项，
-// 任意历史月份都点得到。选到当年时月份只开到本月——余额是月末快照、收益是整月
-// 结果，还没过完的月记了没意义。
-// 年份下限 = 「最早记录那一年」和「当前年往前 5 年」里更早的那个：
-// 平时至少能翻到 5 年前，记录更早则自动扩到那一年
-const MONTH_BACK_YEARS = 5;
+// ---------------- 记余额 / 记收益的「年 + 月」选择 ----------------
+// 年份手输、月份下拉。年份下拉不管放宽到多少年都还是个天花板，
+// 补录多少年前的账不该被一个列表的长度限制住。月份选到当年时只开到本月
+// ——余额是月末快照、收益是整月结果，还没过完的月记了没意义。
+const YEAR_MIN = 1900;
 
-function modalYearList() {
+function validModalYear(y) {
+    const n = Number(y);
     const nowYear = new Date().getFullYear();
-    let earliest = null;
-    // 余额和收益一起看：记收益时往往正是"有余额但还没录收益"的那个月
-    state.balances.concat(state.returns).forEach(r => {
-        const y = Number(String(r.month || '').slice(0, 4));
-        if (y && (!earliest || y < earliest)) earliest = y;
-    });
-    const floor = Math.min(earliest || nowYear, nowYear - MONTH_BACK_YEARS);
-    const list = [];
-    for (let y = nowYear; y >= floor; y--) list.push(y);
-    return list;
+    return Number.isFinite(n) && n >= YEAR_MIN && n <= nowYear ? n : null;
 }
 
 function modalMonthList(year) {
@@ -5434,50 +5424,56 @@ function modalMonthList(year) {
     return list;
 }
 
-// clampMonth=true 用于"年份变了"：把月份收窄到该年允许的范围，而不是把范围撑大
-function paintModalMonth(prefix, ym, clampMonth) {
-    const ySel = document.getElementById(prefix + 'InYear');
-    const mSel = document.getElementById(prefix + 'InMonth');
-    if (!ySel || !mSel) return '';
+// 写入两个控件；月份超出该年允许的范围就贴到最近的可选项（当年只能到本月）
+function paintModalMonth(prefix, ym) {
+    const yEl = document.getElementById(prefix + 'InYear');
+    const mEl = document.getElementById(prefix + 'InMonth');
+    if (!yEl || !mEl) return '';
     const now = new Date();
-    let year = Number(String(ym || '').slice(0, 4)) || now.getFullYear();
+    const year = validModalYear(String(ym || '').slice(0, 4)) || now.getFullYear();
+    const months = modalMonthList(year);
     let month = Number(String(ym || '').slice(5, 7)) || (now.getMonth() + 1);
-
-    const years = modalYearList();
-    if (years.indexOf(year) < 0) { years.push(year); years.sort((a, b) => b - a); }
-    ySel.innerHTML = years.map(y => `<option value="${y}">${y} 年</option>`).join('');
-    ySel.value = String(year);
-
-    let months = modalMonthList(year);
-    if (months.indexOf(month) < 0) {
-        if (clampMonth) month = months[0];               // 超出该年范围就贴到最近的可选项
-        else months.push(month);                          // 补录目标月份，必须能选到
-    }
-    mSel.innerHTML = months.map(m => `<option value="${m}">${m} 月</option>`).join('');
-    mSel.value = String(month);
+    if (months.indexOf(month) < 0) month = months[0];
+    yEl.value = String(year);
+    yEl.dataset.last = `${year}-${String(month).padStart(2, '0')}`;
+    mEl.innerHTML = months.map(m => `<option value="${m}">${m} 月</option>`).join('');
+    mEl.value = String(month);
     return `${year}-${String(month).padStart(2, '0')}`;
 }
 
+// 年份没填对就返回空串，保存逻辑会提示"请选择月份"而不是写进错误的月
 function getModalMonth(prefix) {
-    const ySel = document.getElementById(prefix + 'InYear');
-    const mSel = document.getElementById(prefix + 'InMonth');
-    if (!ySel || !mSel || !ySel.value || !mSel.value) return '';
-    return `${ySel.value}-${String(mSel.value).padStart(2, '0')}`;
+    const yEl = document.getElementById(prefix + 'InYear');
+    const mEl = document.getElementById(prefix + 'InMonth');
+    if (!yEl || !mEl) return '';
+    const year = validModalYear(yEl.value);
+    const month = Number(mEl.value);
+    if (!year || !month) return '';
+    return `${year}-${String(month).padStart(2, '0')}`;
 }
 
 function bindModalMonth(prefix, onChange) {
-    const ySel = document.getElementById(prefix + 'InYear');
-    const mSel = document.getElementById(prefix + 'InMonth');
-    if (mSel && !mSel.dataset.bound) {
-        mSel.dataset.bound = '1';
-        mSel.addEventListener('change', onChange);
+    const yEl = document.getElementById(prefix + 'InYear');
+    const mEl = document.getElementById(prefix + 'InMonth');
+    if (mEl && !mEl.dataset.bound) {
+        mEl.dataset.bound = '1';
+        mEl.addEventListener('change', onChange);
     }
-    if (ySel && !ySel.dataset.bound) {
-        ySel.dataset.bound = '1';
-        ySel.addEventListener('change', () => {
-            paintModalMonth(prefix, getModalMonth(prefix), true);
+    if (yEl && !yEl.dataset.bound) {
+        yEl.dataset.bound = '1';
+        yEl.addEventListener('input', () => {
+            // 只敲了 "2"、"20"、"201" 时什么都不动，等凑成合法年份再刷
+            if (!validModalYear(yEl.value)) return;
+            paintModalMonth(prefix, getModalMonth(prefix));
             onChange();
         });
+        // 只允许数字，顺手把 4 位以外的输入挡掉
+        yEl.addEventListener('beforeinput', (e) => {
+            if (e.data && /[^0-9]/.test(e.data)) e.preventDefault();
+        });
+        // 敲完就规范化；非法或留空则退回上一个合法年份
+        yEl.addEventListener('blur', () => { paintModalMonth(prefix, yEl.dataset.last || ''); });
+        yEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') yEl.blur(); });
     }
 }
 

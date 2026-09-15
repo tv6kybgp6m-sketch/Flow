@@ -700,7 +700,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.28.3</div>
+                                    <div class="about-version">版本 1.28.4</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -926,7 +926,9 @@
                         <div class="form-group be-ym-group">
                             <label>归属月份</label>
                             <div class="ym-pair">
-                                <select class="text-input" id="returnInYear"></select>
+                                <input type="text" class="text-input ym-year" id="returnInYear"
+                                       inputmode="numeric" pattern="[0-9]*" maxlength="4"
+                                       autocomplete="off" placeholder="年份">
                                 <select class="text-input" id="returnInMonth"></select>
                             </div>
                         </div>
@@ -966,7 +968,9 @@
                         <div class="form-group be-ym-group">
                             <label>归属月份</label>
                             <div class="ym-pair">
-                                <select class="text-input" id="balanceInYear"></select>
+                                <input type="text" class="text-input ym-year" id="balanceInYear"
+                                       inputmode="numeric" pattern="[0-9]*" maxlength="4"
+                                       autocomplete="off" placeholder="年份">
                                 <select class="text-input" id="balanceInMonth"></select>
                             </div>
                         </div>
@@ -1136,7 +1140,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.28.3').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.28.4').catch(() => {});
             });
         }
     </script>

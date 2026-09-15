@@ -3407,10 +3407,11 @@ table.bill-stats {
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
 .bal-entry-head .form-group input { width: 100%; min-width: 0; height: 40px; box-sizing: border-box; }
-/* 归属月份现在是「年 + 月」两个下拉，多分一点宽度，两个各占一半 */
+/* 归属月份 = 「年（手输）+ 月（下拉）」，等分等高的规则要同时覆盖两种控件 */
 .bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; }
 .ym-pair { display: flex; gap: 6px; }
-.ym-pair select { flex: 1 1 0; min-width: 0; }
+.ym-pair > * { flex: 1 1 0; min-width: 0; width: auto; }
+.ym-pair .ym-year { text-align: center; }
 .be-section-title {
     display: flex; align-items: center; gap: 6px;
     margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
