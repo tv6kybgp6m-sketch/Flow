@@ -3403,9 +3403,10 @@ table.bill-stats {
 /* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
 .bal-entry-head { display: flex; gap: 10px; align-items: flex-start; }
 .bal-entry-head .form-group { flex: 1 1 0; min-width: 0; }
-/* 原生 month input 有 min-width:auto，不给 min-width:0 两栏会分不匀 */
+/* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
+   否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
-.bal-entry-head .form-group input { width: 100%; min-width: 0; }
+.bal-entry-head .form-group input { width: 100%; min-width: 0; height: 40px; box-sizing: border-box; }
 .be-section-title {
     display: flex; align-items: center; gap: 6px;
     margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);

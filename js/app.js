@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.1';
+const APP_VERSION = '1.28.2';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -5404,11 +5404,43 @@ function closeAccountHistoryModal() {
     historyAccountId = null;
 }
 
+// ---------------- 记余额 / 记收益的月份下拉 ----------------
+// 原来用原生 <input type="month">：手输容易打成 "2026-9" 这种无效值，
+// 而且它在 Safari 里的高度和旁边的成员下拉框对不齐。改成纯 select。
+function monthOptionList(kind, desired) {
+    const now = new Date();
+    const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const cur = key(now);
+    let earliest = null;
+    // 余额和收益一起看：记收益时往往正是"有余额但还没录收益"的那个月
+    state.balances.concat(state.returns).forEach(r => {
+        if (r.month && (!earliest || r.month < earliest)) earliest = r.month;
+    });
+    const list = [];
+    if (earliest) {
+        const parts = earliest.split('-').map(Number);
+        const d = new Date(parts[0], parts[1] - 1, 1);
+        while (key(d) <= cur) { list.push(key(d)); d.setMonth(d.getMonth() + 1); }
+    } else {
+        for (let i = 0; i < 24; i++) list.push(key(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+    }
+    if (desired && list.indexOf(desired) < 0) list.push(desired);
+    return list.sort().reverse();          // 最新在前
+}
+
+function fillMonthSelect(el, kind, desired) {
+    if (!el) return;
+    el.innerHTML = monthOptionList(kind, desired)
+        .map(m => `<option value="${m}">${m.replace('-', '年')}月</option>`).join('');
+}
+
 // ---------------- 记余额弹窗 ----------------
 function openBalanceModal(month) {
     const info = balancePeriodInfo();
     const input = document.getElementById('balanceMonthInput');
-    input.value = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    fillMonthSelect(input, 'balance', want);
+    input.value = want;
     const ms = document.getElementById('balanceMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     renderBalanceEntry();
@@ -7094,7 +7126,8 @@ function deleteReturnSnapshot(id) {
 function openReturnModal(month) {
     const info = returnPeriodInfo();
     const input = document.getElementById('returnMonthInput');
-    if (input) input.value = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    if (input) { fillMonthSelect(input, 'return', want); input.value = want; }
     const ms = document.getElementById('returnMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     renderReturnEntry();
