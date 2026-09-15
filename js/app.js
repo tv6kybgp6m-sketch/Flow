@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.0';
+const APP_VERSION = '1.28.1';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -6398,11 +6398,9 @@ function portfolioCumulative(months) {
         return { month: m, ...st };
     });
     const cumulative = n > 0 ? acc - 1 : null;
-    // 年化：按有收益率的月份数折算
-    const annualized = (cumulative !== null && n > 0)
-        ? Math.pow(1 + cumulative, 12 / n) - 1
-        : null;
-    return { series, months: n, cumulative, annualized };
+    // 不做年化折算：把 1 个月的 3% 报成"年化 36%"只会误导人。
+    // 想看某一年，就把那一年的月份传进来，得到的是逐月连乘的实际累计。
+    return { series, months: n, cumulative };
 }
 
 function pctText(r, digits) {
@@ -6644,11 +6642,22 @@ function renderReturnRates(info) {
     const ids = investmentAccountIds();
     const cum = portfolioCumulative();
     const cur = portfolioMonthStats(info.month, ids);
+    // 本年收益率 = 只看这一年的月份逐月连乘，不往外推
+    const nowYear = new Date().getFullYear();
+    const viewYear = info.selYear || info.year || nowYear;
+    const ytd = portfolioCumulative(returnMonths().filter(m => Number(m.slice(0, 4)) === Number(viewYear)));
 
     const rateCls = r => (r === null ? undefined : (r > 0 ? 'up' : (r < 0 ? 'down' : undefined)));
     setText('retRateMonth', pctText(cur.rate), rateCls(cur.rate));
     setText('retRateCum', pctText(cum.cumulative), rateCls(cum.cumulative));
-    setText('retRateAnnual', pctText(cum.annualized), rateCls(cum.annualized));
+    setText('retRateYear', pctText(ytd.cumulative), rateCls(ytd.cumulative));
+
+    const yh = document.getElementById('retRateYearHint');
+    if (yh) {
+        yh.textContent = ytd.months
+            ? `${viewYear} 年 ${ytd.months} 个月连乘${Number(viewYear) === nowYear ? '（至今）' : ''}`
+            : `${viewYear} 年还没有可计算的收益率`;
+    }
 
     const mh = document.getElementById('retRateMonthHint');
     if (mh) {
@@ -6672,8 +6681,6 @@ function renderReturnRates(info) {
     }
     const ch = document.getElementById('retRateCumHint');
     if (ch) ch.textContent = cum.months ? `按 ${cum.months} 个有收益率的月份连乘` : '';
-    const ah = document.getElementById('retRateAnnualHint');
-    if (ah) ah.textContent = cum.months && cum.months < 12 ? '不足一年，按月折算' : '';
 
     const scope = document.getElementById('retScopeNote');
     if (scope) {
