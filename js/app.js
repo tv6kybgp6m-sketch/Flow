@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.5';
+const APP_VERSION = '1.29.0';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -639,7 +639,11 @@ function closeTopmostOverlay() {
 // ---- Soft delete (tombstones) ----
 // Deleting a record keeps a marker behind so the removal can travel to other
 // devices: a plain union merge could only ever add rows, never remove them.
-const TOMBSTONE_TTL_DAYS = 30;
+// 墓碑保留期。设备离线超过这个时间再上线，删除标记已经过期，
+// 并集合并只会"加"不会"删"，那台设备上的旧记录就会复活。
+// 两台设备交替用，一个月不同步很常见，30 天太紧；墓碑每条约 40 字节，
+// 留一年多也才几 KB，直接放宽到 400 天。
+const TOMBSTONE_TTL_DAYS = 400;
 
 function normalizeTombstones(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
@@ -893,21 +897,27 @@ async function handleICloudFileChange(remoteData) {
 
 // 内容指纹：只看每行的 id + 时间戳，忽略数组顺序（合并会重建数组，顺序变化不算改动）。
 // 用于判断「这次合并到底改没改东西」，没改就不回推 iCloud。
-function syncFingerprint() {
+// 载荷版本可以算在远端内容上，Gist 同步要靠它判断"远端已经是这份了，别重复推"。
+function fingerprintOfPayload(p) {
     const sig = list => (Array.isArray(list) ? list : [])
         .map(x => `${x.id !== undefined ? x.id : ''}:${x.updatedAt !== undefined ? x.updatedAt : (x.deletedAt || '')}`)
         .sort().join(',');
-    const d = state.deleted || {};
+    const d = (p && p.data) || {};
+    const del = d.deleted || {};
     return [
-        sig(state.transactions), sig(state.categories), sig(state.budgets),
-        sig(state.accounts), sig(state.balances), sig(state.returns),
-        sig(state.insurancePolicies),
-        (state.paymentMethods || []).slice().sort().join(','),
-        (state.balanceMembers || []).slice().sort().join(','),
-        (state.insuranceMembers || []).slice().sort().join(','),
-        JSON.stringify(state.fundTargets || {}),
-        sig(d.transactions), sig(d.balances), sig(d.returns), sig(d.accounts), sig(d.insurance),
+        sig(d.transactions), sig(d.categories), sig(d.budgets),
+        sig(d.accounts), sig(d.balances), sig(d.returns),
+        sig(d.insurancePolicies),
+        (d.paymentMethods || []).slice().sort().join(','),
+        (d.balanceMembers || []).slice().sort().join(','),
+        (d.insuranceMembers || []).slice().sort().join(','),
+        JSON.stringify(d.fundTargets || {}),
+        sig(del.transactions), sig(del.balances), sig(del.returns), sig(del.accounts), sig(del.insurance),
     ].join('|');
+}
+
+function syncFingerprint() {
+    return fingerprintOfPayload(buildSyncPayload());
 }
 
 function mergeRemoteData(remoteData) {
@@ -1151,6 +1161,143 @@ async function ensureUnlocked(kring, why) {
     throw new Error(lastError || '口令或恢复码不正确');
 }
 
+// ==================== 数据体检 ====================
+// 只报告，不自动修：这些情况多半是"另一台设备/导入的旧文件"带来的，
+// 自动删等于替用户做决定，删错了账本就毁了。
+function dataHealthCheck() {
+    const acctIds = new Set(state.accounts.map(a => a.id));
+    const catIds = new Set(state.categories.map(c => c.id));
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const uniq = list => [...new Set(list.filter(Boolean))];
+    const dupIds = list => {
+        const seen = new Set(), dup = new Set();
+        list.forEach(x => { const k = x && x.id; if (k) { if (seen.has(k)) dup.add(k); seen.add(k); } });
+        return [...dup];
+    };
+    const shorten = names => names.length <= 6 ? names.join('、')
+        : `${names.slice(0, 6).join('、')} 等 ${names.length} 项`;
+
+    const findings = [];
+    const add = (level, text, detail) => findings.push({ level, text, detail: detail || '' });
+
+    const orphanBal = state.balances.filter(b => !acctIds.has(b.accountId));
+    if (orphanBal.length) add('warn', `${orphanBal.length} 条余额指向已删除的账户`,
+        shorten(uniq(orphanBal.map(b => b.accountId))));
+    const orphanRet = state.returns.filter(r => !acctIds.has(r.accountId));
+    if (orphanRet.length) add('warn', `${orphanRet.length} 条收益指向已删除的账户`,
+        shorten(uniq(orphanRet.map(r => r.accountId))));
+    const badCat = state.transactions.filter(t => t.categoryId && !catIds.has(t.categoryId));
+    if (badCat.length) add('warn', `${badCat.length} 笔交易的分类已不存在`, shorten(uniq(badCat.map(t => t.categoryId))));
+    const future = state.transactions.filter(t => t.date && t.date > todayKey);
+    if (future.length) add('info', `${future.length} 笔交易日期在未来`, shorten(uniq(future.map(t => t.date))));
+    const zero = state.transactions.filter(t => !(Number(t.amount) > 0));
+    if (zero.length) add('info', `${zero.length} 笔交易金额是 0 或负数`, shorten(zero.slice(0, 6).map(t => `${t.date} ${t.amount}`)));
+    const dups = [].concat(dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns));
+    if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)));
+
+    // 账户平时在记、中间却断了几个月：这是最常见的漏记
+    const gaps = [];
+    const byAcct = {};
+    state.balances.forEach(b => {
+        if (!b.month) return;
+        (byAcct[b.accountId] = byAcct[b.accountId] || []).push(b.month);
+    });
+    Object.keys(byAcct).forEach(id => {
+        const ms = [...new Set(byAcct[id])].sort();
+        if (ms.length < 2) return;
+        const a = accountById(id);
+        if (!a) return;
+        let missing = 0;
+        const start = ms[0], end = ms[ms.length - 1];
+        let cur = start;
+        while (cur < end) { cur = nextMonthOf(cur); if (ms.indexOf(cur) < 0) missing++; }
+        if (missing) gaps.push({ name: a.name, missing });
+    });
+    if (gaps.length) add('info', `${gaps.length} 个账户的余额月份有断档`,
+        shorten(gaps.slice(0, 8).map(g => `${g.name} 缺 ${g.missing} 个月`)));
+
+    const txnMonths = uniq(state.transactions.map(t => getMonthKey(t.date))).sort();
+    const balMonths = uniq(state.balances.map(b => b.month)).sort();
+    const tombCount = Object.keys(state.deleted || {}).reduce((s, k) => s + ((state.deleted[k] || []).length), 0);
+    const all = [].concat(state.transactions, state.balances, state.returns);
+    const ids = all.map(x => x.id).filter(Boolean);
+    const noId = all.length - ids.length;
+    if (noId) add('warn', `${noId} 条记录没有 id，同步时可能丢`, '');
+
+    return {
+        findings,
+        stats: {
+            txn: state.transactions.length,
+            txnSpan: txnMonths.length ? `${txnMonths[0]} ~ ${txnMonths[txnMonths.length - 1]}` : '—',
+            txnMonths: txnMonths.length,
+            bal: state.balances.length,
+            balMonths: balMonths.length,
+            balSpan: balMonths.length ? `${balMonths[0]} ~ ${balMonths[balMonths.length - 1]}` : '—',
+            ret: state.returns.length,
+            accounts: state.accounts.length,
+            assets: state.accounts.filter(a => a.kind === 'asset').length,
+            liabilities: state.accounts.filter(a => a.kind === 'liability').length,
+            tombstones: tombCount,
+            // 直接量当前存进去的字符串：__lastSavedBytes 只在真正落盘后才更新，
+            // 刚打开设置页时还是 0，会显示"0 KB / 约占上限 0%"
+            bytes: (() => {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    return raw ? raw.length : (__lastSavedBytes || 0);
+                } catch (e) { return __lastSavedBytes || 0; }
+            })(),
+            limit: 5 * 1024 * 1024,            // 单个源大约 5MB 额度（4MB 是提前预警线）
+            origin: location.origin,
+            deviceId: typeof DEVICE_ID !== 'undefined' ? DEVICE_ID : '',
+            lastExportAt: state.lastExportAt || 0,
+            encrypted: LedgerCrypto.isEnabled(),
+            gist: !!(typeof remoteSyncCfg !== 'undefined' && remoteSyncCfg && remoteSyncCfg.gistId),
+            native: isElectron(),
+        },
+    };
+}
+
+function renderDataHealth() {
+    const box = document.getElementById('dataHealthSection');
+    if (!box) return;
+    const h = dataHealthCheck();
+    const s = h.stats;
+    const warn = h.findings.filter(f => f.level === 'warn').length;
+    const info = h.findings.filter(f => f.level === 'info').length;
+    const pct = s.limit > 0 ? Math.min(100, (s.bytes / s.limit) * 100) : 0;
+    const exportTxt = s.lastExportAt ? relTimeText(s.lastExportAt) : '从未导出';
+
+    const head = warn > 0
+        ? `<div class="dh-sum warn"><i class="fa-solid fa-circle-exclamation"></i> 发现 ${warn} 项需要留意${info ? `、${info} 项仅供参考` : ''}</div>`
+        : (info > 0
+            ? `<div class="dh-sum ok"><i class="fa-solid fa-circle-check"></i> 没有发现明显问题${`（${info} 项仅供参考）`}</div>`
+            : `<div class="dh-sum ok"><i class="fa-solid fa-circle-check"></i> 数据看起来是干净的</div>`);
+
+    const grid = [
+        { k: '交易', v: `${s.txn} 笔`, n: `跨 ${s.txnMonths} 个月 · ${s.txnSpan}` },
+        { k: '余额记录', v: `${s.bal} 条`, n: `${s.balMonths} 个月 · ${s.balSpan}` },
+        { k: '收益记录', v: `${s.ret} 条`, n: '' },
+        { k: '账户', v: `${s.accounts} 个`, n: `资产 ${s.assets} · 负债 ${s.liabilities}` },
+        { k: '存储占用', v: `${(s.bytes / 1024).toFixed(0)} KB`, n: `约占上限 ${pct.toFixed(0)}%` },
+        { k: '上次导出', v: exportTxt, n: s.encrypted ? '备份已加密' : '备份为明文' },
+    ];
+
+    box.innerHTML = head
+        + `<div class="dh-grid">${grid.map(g => `
+            <div class="dh-cell"><span class="dh-k">${_esc(g.k)}</span>
+                <span class="dh-v">${_esc(g.v)}</span>${g.n ? `<span class="dh-n">${_esc(g.n)}</span>` : ''}</div>`).join('')}</div>`
+        + (h.findings.length ? `<div class="dh-list">${h.findings.map(f => `
+                <div class="dh-item ${f.level}"><i class="fa-solid ${f.level === 'warn' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
+                    <span class="dh-text">${_esc(f.text)}${f.detail ? `<em>${_esc(f.detail)}</em>` : ''}</span></div>`).join('')}</div>` : '')
+        + `<div class="dh-where">
+            <div><span>数据所在地址</span><code>${_esc(s.origin)}</code></div>
+            <div><span>本机设备号</span><code>${_esc(s.deviceId)}</code></div>
+            <div class="dh-tip">浏览器按地址隔离数据：换一个地址（哪怕同一份程序）就是一本全新的账，
+                换设备请用「备份为 JSON / 导入 JSON」搬数据。${s.gist ? '云同步已开启。' : ''}</div>
+        </div>`;
+}
+
 // ---------------- 加密设置区 ----------------
 let __encMode = 'setup';          // setup | change | showcode
 let __pendingRecoveryCode = '';
@@ -1331,9 +1478,73 @@ async function disableEncryptionClick() {
 // ---------------- 检查更新 ----------------
 // 导航走 cache-first + 后台刷新，所以过去要"开两次"才换新，看起来像更新失败。
 // 这里给一个手动入口：强制 worker 重新检查，并把状态说清楚。
+const UPDATE_CHECK_URLS = [
+    'https://tv6kybgp6m-sketch.github.io/Flow/index.html',
+    'https://hghx5zcg.qwenwork.host/index.html',
+];
+let __updateCheck = null;         // { version, newer, at } —— 桌面版启动时静默查一次的结果
+
+async function fetchPublishedVersion() {
+    for (const url of UPDATE_CHECK_URLS) {
+        try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 5000);
+            const res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
+                { cache: 'no-store', signal: ctrl.signal });
+            clearTimeout(timer);
+            if (!res.ok) continue;
+            const html = await res.text();
+            const v = (html.match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1];
+            if (v) return v;
+        } catch (e) { /* 换下一个地址 */ }
+    }
+    return null;
+}
+
+function versionNewer(a, b) {
+    const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+        const x = pa[i] || 0, y = pb[i] || 0;
+        if (x !== y) return x > y;
+    }
+    return false;
+}
+
+// 桌面版没法自己更新，只能告诉你"线上是几点几版，去重装 dmg"
+async function checkAppUpdate(reason) {
+    const v = await fetchPublishedVersion();
+    if (!v) return null;
+    __updateCheck = { version: v, newer: versionNewer(v, APP_VERSION), at: Date.now() };
+    if (reason === 'startup') {
+        if (__updateCheck.newer) showToast(`发现新版本 v${v}，需要重装 dmg 更新`, 'info');
+    }
+    return __updateCheck;
+}
+
+function renderUpdateHint() {
+    const hint = document.getElementById('updateHint');
+    if (!hint) return;
+    if (!__updateCheck) { hint.textContent = '离线缓存会在后台自动升级；卡住时可以点这里'; return; }
+    const when = relTimeText(__updateCheck.at);
+    hint.textContent = __updateCheck.newer
+        ? `线上已是 v${__updateCheck.version}（当前 v${APP_VERSION}），请重新下载安装 ${when}查过`
+        : `线上 v${__updateCheck.version} · 已是最新（${when}查过）`;
+}
+
 async function checkForUpdate() {
     const hint = document.getElementById('updateHint');
     const say = (t) => { if (hint) hint.textContent = t; };
+
+    // 桌面版：没有离线缓存这回事，比的是"线上版本 vs 打包进 .app 的版本"
+    if (isElectron()) {
+        say('正在比对线上版本…');
+        const r = await checkAppUpdate('manual');
+        if (!r) { say('连不上发布地址，稍后再试'); showToast('检查更新失败：网络不通', 'error'); return; }
+        renderUpdateHint();
+        showToast(r.newer ? `有新版本 v${r.version}，请重装 dmg` : `已是最新 v${APP_VERSION}`, r.newer ? 'info' : 'success');
+        return;
+    }
+
     if (!('serviceWorker' in navigator)) {
         say('这个环境没有离线缓存，刷新页面即可');
         showToast('没有离线缓存，刷新页面即可', 'info');
@@ -1595,6 +1806,8 @@ let __remoteVisibilityHooked = false;
 let __remoteBusy = false;
 let __lastPushedFingerprint = null;
 let __remoteLastError = '';
+// 上一次从远端读到的内容指纹（也是成功推送后的内容），用来避免重复回推
+let __remoteSeenFingerprint = null;
 
 function loadRemoteSyncConfig() {
     try {
@@ -1718,12 +1931,20 @@ async function remotePullAndMerge() {
         renderView(state.currentView);
         updateSidebarSummary();
     }
+    __remoteSeenFingerprint = fingerprintOfPayload(remoteData);   // 远端现在的内容长这样
     __lastPushedFingerprint = syncFingerprint();          // 拉下来的状态即视为已同步基线
     return true;
 }
 
 async function remotePush() {
     const payload = buildSyncPayload();
+    // 远端已经是这份内容就别再写了：否则两台设备会每 60 秒互相回推一份
+    // 一模一样的数据，还会不停刷 Gist 的 revision 历史
+    const mine = fingerprintOfPayload(payload);
+    if (__remoteSeenFingerprint && mine === __remoteSeenFingerprint) {
+        __remoteLastError = '';
+        return true;
+    }
     let text;
     if (LedgerCrypto.isEnabled()) {
         const env = await buildCloudEnvelope(payload);
@@ -1743,6 +1964,7 @@ async function remotePush() {
     if (r.networkError) { __remoteLastError = '网络不通'; return false; }
     if (r.status !== 200) { __remoteLastError = remoteErrorText(r.status); return false; }
     __remoteLastError = '';
+    __remoteSeenFingerprint = mine;
     __lastPushedFingerprint = syncFingerprint();
     remoteSyncCfg.lastSyncAt = Date.now();
     saveRemoteSyncConfig();
@@ -2060,7 +2282,9 @@ function showToast(message, type = 'success') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     const iconMap = { success: 'fa-check-circle', error: 'fa-times-circle', info: 'fa-info-circle' };
-    toast.innerHTML = `<i class="fa-solid ${iconMap[type] || iconMap.success}"></i> ${message}`;
+    // 消息里可能夹带外部内容（GitHub 响应头、错误文本），必须转义再进 innerHTML；
+    // 真需要富文本的调用方走自己的构造（见 showUndoToast）
+    toast.innerHTML = `<i class="fa-solid ${iconMap[type] || iconMap.success}"></i> ${_esc(message)}`;
     container.appendChild(toast);
     setTimeout(() => {
         toast.classList.add('fade-out');
@@ -4220,6 +4444,8 @@ function renderSettings() {
     renderBackupHistory();
     renderRecurringSection();
     renderEncryptionSection();
+    renderDataHealth();
+    renderUpdateHint();
     // 版本号以代码里的常量为准，避免和 index.html 里的静态文字对不上
     const av = document.querySelector('.about-version');
     if (av) av.textContent = '版本 ' + APP_VERSION;
@@ -5027,6 +5253,225 @@ function renderBalance() {
     renderBalanceStats();
     renderBalanceMemberBar();
     renderFamilySummary();
+    renderNetBridge();
+    renderBalanceCloseCard();
+}
+
+// ==================== 净资产变动桥 ====================
+// 流水和余额快照是两套独立记录：收入支出走流水，市值涨跌走余额。
+// 两边一减，剩下的"待核对"就是漏记、多记或者没录的收益 —— 这才是这张图的价值。
+function netWorthBridge(month) {
+    const member = state.balanceOwner;
+    const prev = previousMonthOf(month);
+    const prevMap = prev ? balancesAtMonth(prev, member) : {};
+    const curMap = balancesAtMonth(month, member);
+    const openT = totalsFromMap(prevMap);
+    const closeT = totalsFromMap(curMap);
+    const txns = state.transactions.filter(t => getMonthKey(t.date) === month);
+    const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const retMap = returnsAtMonth(month, member);
+    const profit = Object.keys(retMap).reduce((s, k) => s + (Number(retMap[k]) || 0), 0);
+    // 房产/车辆升值没人录收益，但它确实改变净资产；不单独拆出来就会全砸进"待核对"
+    let fixedMove = 0, fixedTouched = false;
+    balAccounts().filter(a => a.group === '固定资产').forEach(a => {
+        if (prevMap[a.id] === undefined || curMap[a.id] === undefined) return;
+        fixedTouched = true;
+        fixedMove += (Number(curMap[a.id]) || 0) - (Number(prevMap[a.id]) || 0);
+    });
+    const delta = closeT.net - openT.net;
+    const saved = income - expense;
+    const unexplained = delta - saved - profit - fixedMove;
+    // 容忍度看"这个月动了多少"，不看净资产：净资产 170 万时按净资产百分比算，
+    // 会把近一万元的差额判成正常。下限 1 元只吸收四舍五入。
+    const tol = Math.max(1, Math.abs(delta) * 0.01);
+    return {
+        month, prev, open: openT.net, close: closeT.net, income, expense, saved, profit,
+        fixedMove, fixedTouched, delta, unexplained, txnCount: txns.length,
+        openKnown: Object.keys(prevMap).length > 0,
+        closeKnown: Object.keys(curMap).length > 0,
+        balanced: Math.abs(unexplained) <= tol,
+    };
+}
+
+function renderNetBridge() {
+    const card = document.getElementById('bridgeCard');
+    if (!card) return;
+    const info = balancePeriodInfo();
+    if (!info.month) { card.classList.add('hidden'); return; }
+    const b = netWorthBridge(info.month);
+    if (!b.closeKnown) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+
+    document.getElementById('bridgeSubtitle').textContent =
+        `${info.month.replace('-', '年')}月 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`;
+
+    const sign = v => (v > 0 ? '+' : '') + formatCurrency(v);
+    const rows = [
+        { k: '期初净资产', v: b.open, cls: 'neutral' },
+        { k: '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', note: `${sign(b.income)} 收 / ${formatCurrency(b.expense)} 支` },
+        { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down' },
+    ];
+    if (b.fixedTouched && Math.abs(b.fixedMove) > 0.005) {
+        rows.push({ k: '固定资产市值变动', v: b.fixedMove, cls: b.fixedMove >= 0 ? 'up' : 'down', note: '房产 / 车辆余额的月度差值，不用另录收益' });
+    }
+    rows.push({
+        k: '待核对差额', v: b.unexplained, cls: b.balanced ? 'ok' : 'warn',
+        note: b.balanced ? '两套记录对得上' : '既不在流水里、也不算收益，需要查一下',
+    });
+    rows.push({ k: '期末净资产', v: b.close, cls: 'neutral' });
+    document.getElementById('bridgeRows').innerHTML = rows.map(r => `
+        <div class="bridge-row ${r.cls}">
+            <span class="br-key">${_esc(r.k)}</span>
+            <span class="br-val">${r.k === '期末净资产' || r.k === '期初净资产' ? formatCurrency(r.v) : sign(r.v)}</span>
+            ${r.note ? `<span class="br-note">${_esc(r.note)}</span>` : ''}
+        </div>`).join('');
+
+    const note = document.getElementById('bridgeNote');
+    note.innerHTML = b.openKnown
+        ? `<i class="fa-solid fa-circle-info"></i> 环比 ${sign(b.delta)}。账户之间互转不影响净资产，所以不出现在这张图里；"待核对"通常来自漏记流水、余额记错，或有账户升值但没录收益。`
+        : `<i class="fa-solid fa-triangle-exclamation"></i> 缺少 ${b.prev ? b.prev.replace('-', '年') + '月' : '上个月'} 的余额，期初按 0 算，"待核对"这一项没有意义 —— 补上上个月余额后才有参考价值。`;
+
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => drawBridgeChart(b)).catch(() => {}); return; }
+    drawBridgeChart(b);
+}
+
+function drawBridgeChart(b) {
+    const canvas = document.getElementById('bridgeChart');
+    if (!canvas) return;
+    if (charts.bridge) { charts.bridge.destroy(); charts.bridge = null; }
+    const ctx = canvas.getContext('2d');
+    const textColor = chartPalette().text;
+    let run = b.open;
+    const steps = [[0, b.open]];
+    const labels = ['期初', '储蓄', '投资收益'];
+    const colors = ['#aeaeb2',
+        b.saved >= 0 ? '#34c759' : '#ff3b30',
+        b.profit >= 0 ? '#34c759' : '#ff3b30'];
+    steps.push([run, run + b.saved]); run += b.saved;
+    steps.push([run, run + b.profit]); run += b.profit;
+    if (b.fixedTouched && Math.abs(b.fixedMove) > 0.005) {
+        labels.push('固定资产');
+        colors.push(b.fixedMove >= 0 ? '#34c759' : '#ff3b30');
+        steps.push([run, run + b.fixedMove]); run += b.fixedMove;
+    }
+    labels.push('待核对', '期末');
+    colors.push(b.balanced ? '#aeaeb2' : '#ff9500', '#0a84ff');
+    steps.push([run, run + b.unexplained]);
+    steps.push([0, b.close]);
+    charts.bridge = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{ data: steps, backgroundColor: colors, borderRadius: 4, barPercentage: 0.68 }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: c => formatCurrency(Math.abs(c.raw[1] - c.raw[0])) } },
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } },
+                y: { ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + (Math.abs(v) >= 10000 ? (v / 10000).toFixed(0) + '万' : v) } },
+            },
+        },
+    });
+}
+
+// ==================== 本月结账清单 ====================
+// 只算"你一直在记的"账户：某个账户历史上记过余额，才认为这个月也该有；
+// 从没记过的（比如一直没用的小额应收）不该天天挂在待办里。
+function balanceCandidateAccounts() {
+    const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
+    const held = new Set(state.balances.map(b => b.accountId));
+    return balAccounts().filter(a => held.has(a.id) || !defaultIds.has(a.id));
+}
+
+function closeChecklist(month) {
+    const member = state.balanceOwner;
+    const map = balancesAtMonth(month, member);
+    const cands = balanceCandidateAccounts();
+    const missingBal = cands.filter(a => map[a.id] === undefined || map[a.id] === null);
+    const invIds = investmentAccountIds();
+    const retMap = returnsAtMonth(month, member);
+    // 只挑"这个月有余额、却没录收益"的投资账户：没余额的账户本来就不用录
+    const missingRet = invIds.filter(id => map[id] !== undefined && (retMap[id] === undefined || retMap[id] === null))
+        .map(id => accountById(id)).filter(Boolean);
+    const b = netWorthBridge(month);
+    const items = [];
+
+    items.push(cands.length === 0
+        ? { state: 'info', text: '还没有需要记余额的账户', act: null }
+        : missingBal.length === 0
+            ? { state: 'ok', text: `余额已记齐（${cands.length} 个账户）`, act: null }
+            : {
+                state: 'warn',
+                text: `还有 ${missingBal.length} 个账户没记余额：${missingBal.map(a => a.name).join('、')}`,
+                act: { label: '去记余额', run: () => openBalanceModal(month) },
+            });
+
+    items.push(invIds.length === 0
+        ? { state: 'info', text: '没有归类为稳健理财 / 长期投资的账户，跳过收益核对', act: null }
+        : missingRet.length === 0
+            ? { state: 'ok', text: '投资账户本月收益都已录入', act: null }
+            : {
+                state: 'warn',
+                text: `${missingRet.length} 个投资账户没录本月收益：${missingRet.map(a => a.name).join('、')}`,
+                act: { label: '去记收益', run: () => openReturnModal(month) },
+            });
+
+    if (!b.openKnown) {
+        items.push({ state: 'info', text: '缺少上个月的余额，暂时无法核对这个月对不对得上', act: null });
+    } else {
+        items.push(b.balanced
+            ? { state: 'ok', text: '流水与余额对得上', act: null }
+            : {
+                state: 'warn',
+                text: `有 ${formatCurrency(Math.abs(b.unexplained))} 对不上：可能是漏记流水、余额记错，或者收益没录`,
+                act: { label: '看变动明细', run: () => document.getElementById('bridgeCard')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+            });
+    }
+
+    items.push(b.txnCount > 0
+        ? { state: 'ok', text: `本月有 ${b.txnCount} 笔流水`, act: null }
+        : {
+            state: 'warn', text: '这个月一笔流水都没有，可能还没开始记',
+            act: { label: '去记一笔', run: () => { switchView('transactions'); openTransactionModal(); } },
+        });
+
+    return { items, bridge: b, month };
+}
+
+function renderBalanceCloseCard() {
+    const card = document.getElementById('closeCard');
+    if (!card) return;
+    const info = balancePeriodInfo();
+    if (!info.month) { card.classList.add('hidden'); return; }
+    const cl = closeChecklist(info.month);
+    card.classList.remove('hidden');
+    document.getElementById('closeMonthLabel').textContent = info.month.replace('-', '年') + '月';
+    const todo = cl.items.filter(i => i.state === 'warn').length;
+    const scored = cl.items.filter(i => i.state !== 'info').length;
+    document.getElementById('closeProgress').textContent = todo === 0
+        ? `${info.month.replace('-', '年')}月已结清 · ${scored} 项全部通过`
+        : `还有 ${todo} 项待处理`;
+
+    const ICONS = { ok: 'fa-circle-check', warn: 'fa-circle-exclamation', info: 'fa-circle-info' };
+    const list = document.getElementById('closeList');
+    list.innerHTML = cl.items.map((it, i) => `
+        <div class="close-item ${it.state}">
+            <i class="fa-solid ${ICONS[it.state] || ICONS.info}"></i>
+            <span class="ci-text">${_esc(it.text)}</span>
+            ${it.act ? `<button class="ci-act" type="button" data-act="${i}">${_esc(it.act.label)}</button>` : ''}
+        </div>`).join('');
+    list.querySelectorAll('.ci-act').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const it = cl.items[Number(btn.dataset.act)];
+            if (it && it.act) it.act.run();
+        });
+    });
 }
 
 function balanceTrendMonths() {
@@ -5531,6 +5976,12 @@ function previousMonthOf(month) {
     if (!month) return null;
     const [y, m] = month.split('-').map(Number);
     return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+function nextMonthOf(month) {
+    if (!month) return null;
+    const [y, m] = month.split('-').map(Number);
+    return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
 function copyLastMonthBalances() {
@@ -7551,6 +8002,10 @@ async function init() {
 
     // 周期记账补记：放在 iCloud 拉取之后，避免拿旧副本重复生成
     setTimeout(() => { try { runRecurringRules(true); } catch (e) { console.error('recurring failed', e); } }, 2500);
+
+    // 桌面版没法自己更新，启动时悄悄比一下线上版本，有新版就提示重装 dmg。
+    // 网页版不需要：刷新就是最新，白跑一次网络请求反而拖慢首屏。
+    if (isElectron()) setTimeout(() => { checkAppUpdate('startup').catch(() => {}); }, 4000);
 }
 
 document.addEventListener('DOMContentLoaded', init);

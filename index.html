@@ -331,6 +331,34 @@
                             <div class="bal-asof" id="balAsOf"></div>
                         </div>
                     </div>
+
+                    <!-- 本月结账清单：把每月重复的那几步集中成待办 -->
+                    <div class="close-card hidden" id="closeCard">
+                        <div class="close-head">
+                            <div class="close-head-text">
+                                <h3>本月结账 <span id="closeMonthLabel"></span></h3>
+                                <div class="close-sub" id="closeProgress"></div>
+                            </div>
+                            <button class="secondary-btn" onclick="renderBalanceCloseCard()"><i class="fa-solid fa-rotate"></i> 重新检查</button>
+                        </div>
+                        <div id="closeList"></div>
+                    </div>
+
+                    <!-- 净资产变动桥：这个月的钱从哪儿来、到哪儿去 -->
+                    <div class="chart-card bridge-card hidden" id="bridgeCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>净资产变动</h3>
+                                <span class="chart-subtitle" id="bridgeSubtitle"></span>
+                            </div>
+                        </div>
+                        <div class="bridge-rows" id="bridgeRows"></div>
+                        <div class="chart-container">
+                            <canvas id="bridgeChart"></canvas>
+                        </div>
+                        <div class="bridge-note" id="bridgeNote"></div>
+                    </div>
+
                     <div class="chart-card drill-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap">
@@ -691,6 +719,10 @@
                             <div id="icloudSyncSection"></div>
                         </div>
                         <div class="settings-section">
+                            <h3><i class="fa-solid fa-stethoscope"></i> 数据体检</h3>
+                            <div id="dataHealthSection"></div>
+                        </div>
+                        <div class="settings-section">
                             <h3><i class="fa-solid fa-lock"></i> 加密</h3>
                             <div id="encryptionSection"></div>
                         </div>
@@ -700,7 +732,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.28.5</div>
+                                    <div class="about-version">版本 1.29.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1146,7 +1178,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.28.5').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.29.0').catch(() => {});
             });
         }
     </script>

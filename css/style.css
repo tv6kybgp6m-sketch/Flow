@@ -3542,3 +3542,98 @@ table.bill-stats {
     border: 1px dashed var(--border-strong); user-select: all; -webkit-user-select: all;
 }
 .enc-ack { font-size: 13.5px; color: var(--text-primary); margin-top: 12px; }
+
+
+/* ---- 本月结账清单 ---- */
+.close-card {
+    margin: 0 0 16px; padding: 14px 16px; border-radius: 14px;
+    background: var(--bg-card); border: 0.5px solid var(--border);
+}
+.close-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.close-head-text h3 { margin: 0; font-size: 15px; }
+.close-head-text h3 span { color: var(--text-secondary); font-weight: 500; font-size: 13px; margin-left: 4px; }
+.close-sub { margin-top: 3px; font-size: 12px; color: var(--text-secondary); }
+#closeList { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.close-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 11px; border-radius: 10px; font-size: 13px;
+    background: var(--bg-content);
+}
+.close-item > i { flex: 0 0 auto; font-size: 14px; }
+.close-item.ok > i { color: var(--income); }
+.close-item.warn { background: #fff7ea; }
+.close-item.warn > i { color: #d9822b; }
+.close-item.info > i { color: var(--text-tertiary); }
+[data-theme="dark"] .close-item.warn { background: #332713; }
+.ci-text { flex: 1 1 auto; min-width: 0; color: var(--text-primary); line-height: 1.5; }
+.ci-act {
+    flex: 0 0 auto; padding: 4px 10px; border-radius: 7px; border: 0.5px solid var(--border-strong);
+    background: var(--bg-card); color: var(--accent); font-size: 12px; cursor: pointer; font-family: var(--font);
+    white-space: nowrap;
+}
+.ci-act:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---- 净资产变动桥 ---- */
+.bridge-card { margin-bottom: 16px; }
+.bridge-rows { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 12px; }
+.bridge-row {
+    display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+    gap: 4px 12px; padding: 7px 10px; border-radius: 8px; font-size: 13px;
+}
+.bridge-row:nth-child(odd) { background: var(--bg-content); }
+.br-key { color: var(--text-secondary); }
+.br-val { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.bridge-row.up .br-val { color: var(--income); }
+.bridge-row.down .br-val { color: var(--expense); }
+.bridge-row.warn .br-val { color: #d9822b; }
+.bridge-row.ok .br-val { color: var(--income); }
+.br-note { grid-column: 1 / -1; font-size: 11.5px; color: var(--text-tertiary); }
+.bridge-note { margin-top: 10px; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.bridge-note i { color: var(--text-tertiary); margin-right: 5px; }
+
+
+/* ---- 数据体检 ---- */
+.dh-sum {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    font-size: 13px; font-weight: 600;
+}
+.dh-sum.ok { color: var(--income); }
+.dh-sum.warn { color: #d9822b; }
+[data-theme="dark"] .dh-sum.warn { color: #ffb340; }
+.dh-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px; margin-bottom: 10px;
+}
+.dh-cell {
+    display: flex; flex-direction: column; gap: 2px; padding: 9px 11px;
+    border-radius: 10px; background: var(--bg-content); min-width: 0;
+}
+.dh-k { font-size: 11px; color: var(--text-secondary); }
+.dh-v { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.dh-n { font-size: 10.5px; color: var(--text-tertiary); word-break: break-all; }
+.dh-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.dh-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.55; }
+.dh-item.warn > i { color: #d9822b; margin-top: 2px; }
+.dh-item.info > i { color: var(--text-tertiary); margin-top: 2px; }
+.dh-text { color: var(--text-primary); min-width: 0; }
+.dh-text em { display: block; font-style: normal; color: var(--text-secondary); font-size: 11.5px; word-break: break-all; }
+.dh-where {
+    margin-top: 4px; padding-top: 10px; border-top: 0.5px solid var(--border);
+    display: flex; flex-direction: column; gap: 5px; font-size: 12px;
+}
+.dh-where > div { display: flex; align-items: baseline; gap: 8px; }
+.dh-where span { flex: 0 0 auto; min-width: 76px; color: var(--text-secondary); white-space: nowrap; }
+.dh-where code {
+    flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--text-primary);
+    background: var(--bg-content); padding: 2px 6px; border-radius: 5px; word-break: break-all;
+}
+.dh-tip { display: block !important; color: var(--text-tertiary); font-size: 11.5px; line-height: 1.6; margin-top: 3px; }
+/* 设置页一行里按钮不该被长说明挤成竖排 */
+.settings-row > button,
+.settings-row .secondary-btn,
+.settings-row .danger-btn,
+.settings-row .primary-btn { flex: 0 0 auto; white-space: nowrap; }
+.dh-where > div { flex-wrap: wrap; }
+@media (max-width: 640px) {
+    .dh-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
