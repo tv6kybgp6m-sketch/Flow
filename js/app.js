@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.4';
+const APP_VERSION = '1.28.5';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in

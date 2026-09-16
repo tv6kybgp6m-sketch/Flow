@@ -700,7 +700,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.28.4</div>
+                                    <div class="about-version">版本 1.28.5</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1130,7 +1130,13 @@
         // Register Service Worker for PWA offline support.
         // The version query bypasses any stale cached copy of sw.js, which would
         // otherwise let an old cache-first worker pin the app to an outdated build.
-        if ('serviceWorker' in navigator) {
+        //
+        // 原生 Mac 壳里不注册：bridge.js 每次加载文档都会先注销 worker（桌面版从本机
+        // 回环地址加载、程序就打包在 .app 里，离线缓存毫无用处），而下面那个自动刷新
+        // 钩子监听的正是"worker 被接管/失去"事件 —— 两边会互相触发，启动时反复重载、
+        // 页面上下闪。所以桌面壳整段跳过，手机和网页版行为不变。
+        const __nativeShell = !!(window.electronAPI && window.electronAPI.isElectron);
+        if ('serviceWorker' in navigator && !__nativeShell) {
             // 新 worker 接管 = 拿到了新版本，自动刷一次，省掉"要开两次才更新"的困惑。
             // 冷启动时本来没有 controller，那种接管不算更新，别刷。
             const hadController = !!navigator.serviceWorker.controller;
@@ -1140,7 +1146,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.28.4').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.28.5').catch(() => {});
             });
         }
     </script>
