@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.29.2';
+const APP_VERSION = '1.30.0';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -794,15 +794,13 @@ async function initICloudSync() {
         iCloudSyncEnabled = true;
 
         // Listen for file changes from other devices
-        window.electronAPI.icloud.onFileChange((data) => {
-            handleICloudFileChange(data);
+        window.electronAPI.icloud.onFileChange(() => {
+            // 监听只告诉我们"文件夹变了"，具体要合并的是全部文件
+            handleICloudFileChange(null);
         });
 
         // On startup, pull from iCloud and merge
-        const remoteData = await resolveCloudPayload(await window.electronAPI.icloud.readData());
-        if (remoteData && remoteData.data) {
-            mergeRemoteData(remoteData);
-        }
+        await mergeAllCloud('startup');
 
         // Push current data to iCloud
         await syncToICloud();
@@ -892,16 +890,42 @@ async function resolveCloudPayload(raw) {
     return null;
 }
 
-async function handleICloudFileChange(remoteData) {
-    const data = await resolveCloudPayload(remoteData);
-    if (!data || !data.data) return;
-    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
-    if (data.deviceId && data.deviceId === DEVICE_ID) return;
-    if (!data.deviceId && data.deviceName === 'Mac' && isElectron()) return;
+// 拉取并合并同步文件夹里的**全部**账本。
+// 以前只挑 lastModified 最大的那一份，而 Mac 每次保存都会刷新自己那份的时间戳，
+// 手机导出的那份（以及 iOS 生成的"副本"）几乎永远竞争不过 → 看起来"识别不了"。
+// 从旧到新逐个合并：并集 + 墓碑后写优先，多合几份是幂等的，最后的删除也能生效。
+async function mergeAllCloud(reason) {
+    let list = null;
+    try {
+        if (window.electronAPI && window.electronAPI.icloud
+            && typeof window.electronAPI.icloud.readAll === 'function') {
+            list = await window.electronAPI.icloud.readAll();
+        }
+    } catch (e) {
+        console.error('readAll failed:', e);
+    }
+    if (!Array.isArray(list)) {
+        // 老版 App 没有 readAll：退回单份读取，至少不比以前差
+        const one = await resolveCloudPayload(await window.electronAPI.icloud.readData());
+        list = one ? [one] : [];
+    }
+    let changed = false, merged = 0;
+    for (const raw of list) {
+        const data = raw && LedgerCrypto.looksEncrypted(raw) ? await resolveCloudPayload(raw) : raw;
+        if (!data || !data.data) continue;
+        if (data.deviceId && data.deviceId === DEVICE_ID && list.length > 1) continue;  // 自己写的那份不必再合
+        if (mergeRemoteData(data)) changed = true;
+        merged++;
+    }
+    if (merged) iCloudLastSyncTime = Date.now();
+    return { changed, merged };
+}
 
-    const changed = mergeRemoteData(data);
-    if (!changed) return;                 // 对端只是回写了一份和这里相同的内容
+async function handleICloudFileChange() {
+    const r = await mergeAllCloud('change');
+    if (!r.changed) return;               // 对端只是回写了一份和这里相同的内容
     renderView(state.currentView);
+    updateSidebarSummary();
     showToast('已从 iCloud 同步最新数据', 'success');
 }
 
@@ -1747,16 +1771,16 @@ function updateICloudSyncUI() {
 async function syncFromICloudNow() {
     if (!isElectron() || !iCloudSyncEnabled) return;
     try {
-        const raw = await window.electronAPI.icloud.readData();
-        const remoteData = await resolveCloudPayload(raw);
-        if (remoteData && remoteData.data) {
-            mergeRemoteData(remoteData);
+        const r = await mergeAllCloud('manual');
+        if (r.merged === 0) { showToast('iCloud 文件夹里没有可读的账本', 'info'); return; }
+        if (r.changed) {
             renderView(state.currentView);
-            showToast('已从 iCloud 同步最新数据', 'success');
-        } else if (LedgerCrypto.looksEncrypted(raw)) {
-            showToast(__remoteLastError || '云端那份是加密的，本机解不开', 'error');
+            updateSidebarSummary();
+            showToast(`已合并 ${r.merged} 份文件，账本有更新`, 'success');
+        } else if (__remoteLastError) {
+            showToast(__remoteLastError, 'error');
         } else {
-            showToast('iCloud 中暂无同步数据', 'info');
+            showToast(`已检查 ${r.merged} 份文件，没有新内容`, 'info');
         }
     } catch (e) {
         showToast('同步失败', 'error');
