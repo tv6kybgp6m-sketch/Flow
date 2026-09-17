@@ -3,7 +3,16 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.30.0';
+const APP_VERSION = '1.30.1';
+
+// 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
+// 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
+// 下限也不能是 1 元，否则余额四舍五入到百元就会月月误报。
+const RECON_TOL_CAP = 500;
+const RECON_TOL_FLOOR = 50;
+function reconTolerance(movement) {
+    return Math.min(RECON_TOL_CAP, Math.max(RECON_TOL_FLOOR, Math.abs(movement || 0) * 0.01));
+}
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -1228,7 +1237,12 @@ function dataHealthCheck() {
     if (future.length) add('info', `${future.length} 笔交易日期在未来`, shorten(uniq(future.map(t => t.date))));
     const zero = state.transactions.filter(t => !(Number(t.amount) > 0));
     if (zero.length) add('info', `${zero.length} 笔交易金额是 0 或负数`, shorten(zero.slice(0, 6).map(t => `${t.date} ${t.amount}`)));
-    const dups = [].concat(dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns));
+    const dups = [].concat(
+        dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns),
+        dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies));
+    // 预算是按 categoryId 存的，同一个分类出现两条就是脏数据
+    const dupBud = dupIds((state.budgets || []).map(b => ({ id: b.categoryId })));
+    if (dupBud.length) add('warn', `${dupBud.length} 个分类有重复的预算条目`, shorten(dupBud));
     if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)));
 
     // 账户平时在记、中间却断了几个月：这是最常见的漏记
@@ -1513,23 +1527,39 @@ async function disableEncryptionClick() {
 // ---------------- 检查更新 ----------------
 // 导航走 cache-first + 后台刷新，所以过去要"开两次"才换新，看起来像更新失败。
 // 这里给一个手动入口：强制 worker 重新检查，并把状态说清楚。
-const UPDATE_CHECK_URLS = [
-    'https://tv6kybgp6m-sketch.github.io/Flow/index.html',
-    'https://hghx5zcg.qwenwork.host/index.html',
+// 只写站点根地址；版本号从根下的 version.json 读，
+// 不再正则扒首页 HTML —— 改版式把「版本 x.y.z」挪走会让桌面版检查静默失效
+const UPDATE_CHECK_BASES = [
+    'https://tv6kybgp6m-sketch.github.io/Flow/',
+    'https://hghx5zcg.qwenwork.host/',
 ];
 let __updateCheck = null;         // { version, newer, at } —— 桌面版启动时静默查一次的结果
 
+async function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms || 5000);
+    try {
+        const res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
+            { cache: 'no-store', signal: ctrl.signal });
+        return res.ok ? res : null;
+    } finally { clearTimeout(timer); }
+}
+
 async function fetchPublishedVersion() {
-    for (const url of UPDATE_CHECK_URLS) {
+    for (const base of UPDATE_CHECK_BASES) {
+        // 首选 version.json
         try {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 5000);
-            const res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
-                { cache: 'no-store', signal: ctrl.signal });
-            clearTimeout(timer);
-            if (!res.ok) continue;
-            const html = await res.text();
-            const v = (html.match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1];
+            const res = await fetchWithTimeout(base + 'version.json');
+            if (res) {
+                const j = await res.json();
+                if (j && /^\d+\.\d+\.\d+$/.test(String(j.version))) return String(j.version);
+            }
+        } catch (e) { /* 落到 HTML 兜底 */ }
+        // 兜底：老站点没有 version.json，仍从首页文字里取
+        try {
+            const res = await fetchWithTimeout(base + 'index.html');
+            if (!res) continue;
+            const v = ((await res.text()).match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1];
             if (v) return v;
         } catch (e) { /* 换下一个地址 */ }
     }
@@ -5330,9 +5360,8 @@ function netWorthBridge(month) {
     const delta = closeT.net - openT.net;
     const saved = income - expense;
     const unexplained = delta - saved - profit - fixedMove;
-    // 容忍度看"这个月动了多少"，不看净资产：净资产 170 万时按净资产百分比算，
-    // 会把近一万元的差额判成正常。下限 1 元只吸收四舍五入。
-    const tol = Math.max(1, Math.abs(delta) * 0.01);
+    // 同一个封顶容差：按当月实际变动量算，但最多放过 500 元
+    const tol = reconTolerance(delta);
     return {
         month, prev, open: openT.net, close: closeT.net, income, expense, saved, profit,
         fixedMove, fixedTouched, delta, unexplained, txnCount: txns.length,
@@ -6952,8 +6981,10 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
     if (flowKnown && v0 > 0) {
         const implied = v1 - v0 - flow;
         const gap = profit - implied;
-        const tol = Math.max(1, Math.abs(v1) * 0.005);   // 0.5% 以内当四舍五入
-        if (Math.abs(gap) > tol) check = { implied, gap };
+        // 按"这个月真实动过多少钱"算容差（市值变化 + 进出账），
+        // 不能按总市值算 —— 170 万市值按 0.5% 会放过 8500 元的错账
+        const tol = reconTolerance(Math.abs(v1 - v0) + Math.abs(flow));
+        if (Math.abs(gap) > tol) check = { implied, gap, tol };
     }
 
     return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason };
