@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.29.0';
+const APP_VERSION = '1.29.1';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -1652,6 +1652,7 @@ async function applyImportedJSON(text) {
 async function importJsonFile() {
     const picked = await pickLocalFile(['json']);
     if (!picked) return;
+    if (picked.error) { showToast(picked.error, 'error'); return; }
     applyImportedJSON(base64ToText(picked.base64));
 }
 
@@ -4656,7 +4657,12 @@ function pickLocalFile(extensions) {
     const exts = extensions || [];
     if (isElectron() && window.electronAPI && typeof window.electronAPI.openFile === 'function') {
         return window.electronAPI.openFile({ extensions: exts })
-            .then(r => (r && !r.cancelled && r.base64) ? { name: r.name, base64: r.base64 } : null)
+            .then(r => {
+                if (!r || r.cancelled) return null;
+                // 读不到文件时原生侧会给出中文原因，透给调用方去提示
+                if (r.error) return { error: r.error };
+                return r.base64 ? { name: r.name, base64: r.base64 } : null;
+            })
             .catch(() => null);
     }
     return new Promise(resolve => {
@@ -4821,6 +4827,7 @@ async function importExcelFile() {
     }
     const picked = await pickLocalFile(['xlsx', 'xls']);
     if (!picked) return;
+    if (picked.error) { showToast(picked.error, 'error'); return; }
     try {
         const wb = XLSX.read(base64ToUint8(picked.base64), { type: 'array', cellDates: true });
         const res = applyWorkbook(wb) || {};
