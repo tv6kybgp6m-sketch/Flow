@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.29.1';
+const APP_VERSION = '1.29.2';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -873,13 +873,23 @@ async function buildCloudEnvelope(payload) {
 async function resolveCloudPayload(raw) {
     if (!raw) return null;
     if (!LedgerCrypto.looksEncrypted(raw)) return raw;
-    try {
-        await ensureUnlocked(raw.keyring, '读取云端数据');
-        return await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
-    } catch (e) {
-        __remoteLastError = '云端数据需要口令：' + ((e && e.message) || e);
-        return null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            // 第一次用本机密钥静默解；报 WRONG_KEY 说明密钥不是这一份数据的，
+            // 第二次强制弹口令，解出来的正确主密钥会覆盖本机缓存，以后就安静了
+            await ensureUnlocked(raw.keyring, '读取云端数据', attempt > 0);
+            const out = await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
+            if (attempt > 0) showToast('已解锁云端加密数据，之后不用再输', 'success');
+            return out;
+        } catch (e) {
+            const msg = (e && e.message) || String(e);
+            if (msg === 'WRONG_KEY' && attempt === 0) continue;
+            if (msg === '已取消') { __remoteLastError = '已取消：云端那份是加密的，本机打不开'; return null; }
+            __remoteLastError = '云端数据解不开：' + msg;
+            return null;
+        }
     }
+    return null;
 }
 
 async function handleICloudFileChange(remoteData) {
@@ -1139,10 +1149,11 @@ function submitSecretModal() {
 }
 
 // 有本机密钥就静默通过；没有就问到口令或恢复码（最多三次）
-async function ensureUnlocked(kring, why) {
-    if (await LedgerCrypto.hasLocalKey()) return true;
+async function ensureUnlocked(kring, why, force) {
+    if (!force && await LedgerCrypto.hasLocalKey()) return true;
     const kr = kring || LedgerCrypto.keyring();
-    const hint = kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。';
+    const hint = (force ? '这台设备存的密钥开不了这份数据（可能两台设备各自开启过加密）。' : '')
+        + (kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。');
     let lastError = '';
     for (let i = 0; i < 3; i++) {
         const secret = await askSecret({
@@ -1630,14 +1641,20 @@ async function applyImportedJSON(text) {
     let parsed = null;
     try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
     if (LedgerCrypto.looksEncrypted(parsed)) {
-        let plain = null;
-        try {
-            await ensureUnlocked(parsed.keyring, '这份备份是加密的');
-            plain = await LedgerCrypto.decryptEnvelope(parsed);
-        } catch (e) {
-            showToast(e && e.message === '已取消' ? '已取消导入' : '导入失败：' + (e && e.message || e), 'error');
-            return false;
+        let plain = null, lastMsg = '';
+        for (let attempt = 0; attempt < 2 && !plain; attempt++) {
+            try {
+                await ensureUnlocked(parsed.keyring, '这份备份是加密的', attempt > 0);
+                plain = await LedgerCrypto.decryptEnvelope(parsed);
+            } catch (e) {
+                lastMsg = (e && e.message) || String(e);
+                if (lastMsg === 'WRONG_KEY' && attempt === 0) continue;
+                if (lastMsg === '已取消') return false;
+                showToast('导入失败：' + lastMsg, 'error');
+                return false;
+            }
         }
+        if (!plain) { showToast('导入失败：口令解不开这份备份', 'error'); return false; }
         return applyImportedJSON(plain);
     }
     if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
@@ -1737,7 +1754,7 @@ async function syncFromICloudNow() {
             renderView(state.currentView);
             showToast('已从 iCloud 同步最新数据', 'success');
         } else if (LedgerCrypto.looksEncrypted(raw)) {
-            showToast('云端那份是加密的，需要口令或恢复码', 'error');
+            showToast(__remoteLastError || '云端那份是加密的，本机解不开', 'error');
         } else {
             showToast('iCloud 中暂无同步数据', 'info');
         }
