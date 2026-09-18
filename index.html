@@ -493,6 +493,19 @@
                         </div>
                     </div>
                     <div class="ret-check hidden" id="retCheckWarn"></div>
+                    <div class="caliber-note" id="caliberNote">
+                        <div class="cn-head">
+                            <i class="fa-solid fa-circle-info"></i>
+                            <b>这里的"收益"只填市值变动</b>
+                            <button class="cn-close" onclick="dismissCaliberNote()" title="不再显示"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <ul>
+                            <li><b>浮盈浮亏</b> → 填在这里（本月赚/亏了多少）</li>
+                            <li><b>现金分红、派息、赎回到账</b> → 走流水（「交易记录」记成收入），<u>不要</u>再算进这里的收益，否则净资产桥会把它算两遍，"待核对"出现负数</li>
+                            <li><b>银证转账、申购赎回的本金</b> → 填在「净入金」，它不是收益</li>
+                            <li>亏损填负数；这个月没变动就留空</li>
+                        </ul>
+                    </div>
                     <div class="chart-card drill-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap">
@@ -732,7 +745,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.30.1</div>
+                                    <div class="about-version">版本 1.30.2</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -967,7 +980,7 @@
                     </div>
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="clearReturnInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
-                        <span class="ret-tip">亏损填负数，留空表示不记</span>
+                        <span class="ret-tip">只填市值变动；分红走流水；亏损填负数，留空表示不记</span>
                     </div>
                     <div id="returnEntryList" class="balance-entry-list"></div>
                     <button class="add-account-inline" onclick="openAccountsModal()">
@@ -1178,7 +1191,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.30.1').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.30.2').catch(() => {});
             });
         }
     </script>

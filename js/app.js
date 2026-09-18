@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.30.1';
+const APP_VERSION = '1.30.2';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5394,7 +5394,10 @@ function renderNetBridge() {
     }
     rows.push({
         k: '待核对差额', v: b.unexplained, cls: b.balanced ? 'ok' : 'warn',
-        note: b.balanced ? '两套记录对得上' : '既不在流水里、也不算收益，需要查一下',
+        note: b.balanced ? '两套记录对得上'
+            : (b.unexplained < 0
+                ? '少了一笔支出或多记了一笔收入；也可能是分红既进了流水又算进了收益（重复计算）'
+                : '多了一笔收入，或有市值变动没录成收益'),
     });
     rows.push({ k: '期末净资产', v: b.close, cls: 'neutral' });
     document.getElementById('bridgeRows').innerHTML = rows.map(r => `
@@ -5517,6 +5520,32 @@ function closeChecklist(month) {
             state: 'warn', text: '这个月一笔流水都没有，可能还没开始记',
             act: { label: '去记一笔', run: () => { switchView('transactions'); openTransactionModal(); } },
         });
+
+    // 同步新鲜度：月结最怕拿着一份旧账在核对
+    const DAY = 86400000;
+    if (isElectron()) {
+        if (typeof iCloudSyncEnabled === 'undefined' || !iCloudSyncEnabled) {
+            items.push({ state: 'info', text: '未开启 iCloud 同步，请确认手机数据已经通过「导入 JSON」合并进来', act: null });
+        } else {
+            const age = iCloudLastSyncTime ? Math.floor((Date.now() - iCloudLastSyncTime) / DAY) : null;
+            items.push(age === null
+                ? { state: 'warn', text: '本机还没从 iCloud 同步过，先拉一次最新数据再核对这个月',
+                    act: { label: '立即同步', run: () => syncFromICloudNow() } }
+                : age >= 3
+                    ? { state: 'warn', text: `已经 ${age} 天没同步 iCloud，手机上的新记录可能还没过来`,
+                        act: { label: '立即同步', run: () => syncFromICloudNow() } }
+                    : { state: 'ok', text: `iCloud 同步正常（${relTimeText(iCloudLastSyncTime)}）`, act: null });
+        }
+    } else {
+        const expAge = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / DAY) : null;
+        items.push(expAge === null
+            ? { state: 'warn', text: '这台设备还没导出过备份，Mac 那边看不到这里记的账',
+                act: { label: '去导出', run: () => exportToICloud() } }
+            : expAge >= 7
+                ? { state: 'warn', text: `这台设备已经 ${expAge} 天没导出，Mac 上核对的可能是旧账`,
+                    act: { label: '去导出', run: () => exportToICloud() } }
+                : { state: 'ok', text: `这台设备上次导出 ${relTimeText(state.lastExportAt)}`, act: null });
+    }
 
     return { items, bridge: b, month };
 }
@@ -7151,9 +7180,26 @@ function returnTrendBuckets() {
     return all.map(m => ({ key: m, label: m.replace('-', '年') + '月', months: [m] }));
 }
 
+// 收益口径说明：一次性引导，关掉就不再打扰。
+// 存独立键，不进 state.settings —— 那个会同步到别的设备，
+// 一台设备上点掉，另一台就永远看不到这个提醒了。
+const CALIBER_NOTE_KEY = 'bookkeeping_caliber_dismissed';
+function renderCaliberNote() {
+    const el = document.getElementById('caliberNote');
+    if (!el) return;
+    let off = false;
+    try { off = localStorage.getItem(CALIBER_NOTE_KEY) === '1'; } catch (e) { /* 读不到就当没关过 */ }
+    el.classList.toggle('hidden', off);
+}
+function dismissCaliberNote() {
+    try { localStorage.setItem(CALIBER_NOTE_KEY, '1'); } catch (e) { /* 存不下也只是下次还显示 */ }
+    renderCaliberNote();
+}
+
 function renderReturns() {
     if (!document.getElementById('view-returns')) return;
     renderReturnSelectors();
+    renderCaliberNote();
 
     const info = returnPeriodInfo();
     const cur = returnSummary(info.months);

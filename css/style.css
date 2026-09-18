@@ -3637,3 +3637,25 @@ table.bill-stats {
 @media (max-width: 640px) {
     .dh-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+
+/* ---- 收益口径说明 ---- */
+.caliber-note {
+    margin: 0 0 14px; padding: 12px 14px; border-radius: 12px;
+    background: var(--bg-card); border: 0.5px solid var(--border);
+    font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);
+}
+.caliber-note .cn-head {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13.5px; color: var(--text-primary); margin-bottom: 6px;
+}
+.caliber-note .cn-head > i { color: var(--accent); }
+.caliber-note ul { margin: 0; padding-left: 20px; }
+.caliber-note li { margin: 3px 0; }
+.caliber-note b { color: var(--text-primary); }
+.caliber-note u { text-decoration: underline; text-decoration-color: #d9822b; }
+.cn-close {
+    margin-left: auto; padding: 2px 6px; border: none; background: none;
+    color: var(--text-tertiary); cursor: pointer; font-size: 13px;
+}
+.cn-close:hover { color: var(--text-primary); }
