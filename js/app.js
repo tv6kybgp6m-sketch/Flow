@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.30.2';
+const APP_VERSION = '1.31.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -165,6 +165,7 @@ let state = {
     returnYear: null,
     returnMonth: null,
     returnChartType: 'bar',
+    returnCalMetric: 'amount',   // 月度格子：收益额 / 收益率
     returnGran: null,
     balancePeriod: 'month',
     balanceYear: null,
@@ -7200,6 +7201,7 @@ function renderReturns() {
     if (!document.getElementById('view-returns')) return;
     renderReturnSelectors();
     renderCaliberNote();
+    renderReturnCalendar();
 
     const info = returnPeriodInfo();
     const cur = returnSummary(info.months);
@@ -7577,6 +7579,77 @@ function renderReturnBreakdown(info) {
     }).join('');
 }
 
+// ==================== 月度收益格子（日历图）====================
+// 一年 12 格，红涨绿跌沿用 app 全局配色（不是券商软件的"红涨蓝跌"），
+// 免得同一屏里表格是绿的、格子是红的。
+const CN_MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+
+function returnCalYear() {
+    const info = returnPeriodInfo();
+    return Number(state.returnYear || info.year || (returnYears()[returnYears().length - 1]) || new Date().getFullYear());
+}
+
+function setReturnCalMetric(m) {
+    state.returnCalMetric = m === 'rate' ? 'rate' : 'amount';
+    document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retCalMetric === state.returnCalMetric));
+    renderReturnCalendar();
+}
+
+function renderReturnCalendar() {
+    const card = document.getElementById('retCalCard');
+    if (!card) return;
+    const year = returnCalYear();
+    const months = returnMonths();
+    // 那一年完全没记录就别摆一格空日历
+    if (!year || !months.some(m => m.slice(0, 4) === String(year))) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+
+    const rate = state.returnCalMetric === 'rate';
+    const cells = [];
+    let amountTotal = 0;
+    for (let m = 1; m <= 12; m++) {
+        const key = `${year}-${String(m).padStart(2, '0')}`;
+        const has = months.indexOf(key) >= 0;
+        const amount = has ? returnSummary([key]).total : 0;
+        amountTotal += amount;
+        const st = has ? portfolioMonthStats(key) : null;
+        const r = st ? st.rate : null;
+        const val = rate ? r : amount;
+        let cls = 'none';
+        if (has && val !== null && val !== undefined) {
+            cls = val > 0 ? 'up' : (val < 0 ? 'down' : 'flat');
+        } else if (has) {
+            cls = 'unknown';       // 有收益记录，但本金未知算不出率
+        }
+        const shown = rate ? pctText(r) : (has ? formatCurrency(amount) : '—');
+        cells.push(`<div class="ret-cal-cell ${cls}"${has ? ` data-ret-cal-month="${key}" role="button" tabindex="0"` : ''}>
+            <span class="rc-month">${CN_MONTHS[m - 1]}</span>
+            <span class="rc-val">${has ? _esc(shown) : ''}</span>
+        </div>`);
+    }
+    document.getElementById('retCalTitle').textContent = `${year} 年`;
+    document.getElementById('retCalGrid').innerHTML = cells.join('');
+
+    const cum = portfolioCumulative(months.filter(m => m.slice(0, 4) === String(year)));
+    const totalEl = document.getElementById('retCalTotal');
+    if (rate) {
+        totalEl.innerHTML = `本年累计收益率 <b class="${(cum.cumulative || 0) >= 0 ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
+    } else {
+        totalEl.innerHTML = `当年收益 <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${formatCurrency(amountTotal)}</b>`;
+    }
+    const note = document.getElementById('retCalNote');
+    note.textContent = rate
+        ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率'
+        : '空白 = 该月没记录';
+
+    document.querySelectorAll('#retCalGrid [data-ret-cal-month]').forEach(cell => {
+        const open = () => openReturnDetailForMonth(cell.dataset.retCalMonth);
+        cell.addEventListener('click', open);
+        cell.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+}
+
 function renderReturnMonthly() {
     const body = document.getElementById('retMonthlyBody');
     if (!body) return;
@@ -7894,6 +7967,9 @@ function initReturnListeners() {
     });
     document.querySelectorAll('#view-returns [data-ret-gran]').forEach(btn => {
         btn.addEventListener('click', () => setReturnGran(btn.dataset.retGran));
+    });
+    document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnCalMetric(btn.dataset.retCalMetric));
     });
     const ySel = document.getElementById('returnYearSelect');
     if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });

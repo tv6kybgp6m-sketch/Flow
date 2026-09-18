@@ -3659,3 +3659,42 @@ table.bill-stats {
     color: var(--text-tertiary); cursor: pointer; font-size: 13px;
 }
 .cn-close:hover { color: var(--text-primary); }
+
+
+/* ---- 月度收益格子（日历图）---- */
+.ret-cal-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+    margin-top: 12px;
+}
+.ret-cal-cell {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; min-height: 68px; padding: 10px 6px; border-radius: 12px;
+    background: var(--bg-content); color: var(--text-secondary);
+    border: 0.5px solid transparent; cursor: default;
+}
+.ret-cal-cell .rc-month { font-size: 12px; opacity: .9; }
+.ret-cal-cell .rc-val { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 正负沿用 app 全局配色：绿涨红跌 */
+.ret-cal-cell.up { background: var(--income); color: #fff; }
+.ret-cal-cell.down { background: var(--expense); color: #fff; }
+.ret-cal-cell.flat { background: var(--bg-content); color: var(--text-secondary); cursor: pointer; }
+.ret-cal-cell.unknown { background: var(--bg-content); color: var(--text-tertiary); cursor: pointer; }
+.ret-cal-cell.unknown .rc-val { font-size: 14px; }
+.ret-cal-cell.none {
+    background: transparent; border-style: dashed; border-color: var(--border-strong);
+    color: var(--text-tertiary);
+}
+.ret-cal-cell[role="button"] { cursor: pointer; }
+.ret-cal-cell[role="button"]:hover { filter: brightness(1.06); }
+.ret-cal-cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ret-cal-foot {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    margin-top: 12px; font-size: 13px; color: var(--text-secondary); flex-wrap: wrap;
+}
+.ret-cal-foot b { font-variant-numeric: tabular-nums; }
+.rc-note { font-size: 11.5px; color: var(--text-tertiary); text-align: right; }
+@media (max-width: 640px) {
+    .ret-cal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ret-cal-cell { min-height: 60px; }
+    .rc-note { text-align: left; }
+}
