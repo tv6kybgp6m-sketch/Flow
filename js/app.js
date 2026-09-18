@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.31.0';
+const APP_VERSION = '1.31.1';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -166,6 +166,8 @@ let state = {
     returnMonth: null,
     returnChartType: 'bar',
     returnCalMetric: 'amount',   // 月度格子：收益额 / 收益率
+    returnCalMode: 'month',      // 月度格子：月收益（12 格）/ 年收益（按年一格）
+    returnCalYear: null,         // 月收益视图看哪一年；null = 跟随页面年份
     returnGran: null,
     balancePeriod: 'month',
     balanceYear: null,
@@ -7584,9 +7586,17 @@ function renderReturnBreakdown(info) {
 // 免得同一屏里表格是绿的、格子是红的。
 const CN_MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
 
+function returnCalYears() {
+    return returnYears().map(Number).filter(Boolean);
+}
+
 function returnCalYear() {
-    const info = returnPeriodInfo();
-    return Number(state.returnYear || info.year || (returnYears()[returnYears().length - 1]) || new Date().getFullYear());
+    const ys = returnCalYears();
+    const wanted = Number(state.returnCalYear);
+    if (wanted && ys.indexOf(wanted) >= 0) return wanted;
+    const pageYear = Number(state.returnYear || returnPeriodInfo().year);
+    if (pageYear && ys.indexOf(pageYear) >= 0) return pageYear;
+    return ys[ys.length - 1] || new Date().getFullYear();
 }
 
 function setReturnCalMetric(m) {
@@ -7596,55 +7606,104 @@ function setReturnCalMetric(m) {
     renderReturnCalendar();
 }
 
+function setReturnCalMode(m) {
+    state.returnCalMode = m === 'year' ? 'year' : 'month';
+    document.querySelectorAll('#retCalMode [data-ret-cal-mode]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retCalMode === state.returnCalMode));
+    renderReturnCalendar();
+}
+
+// 两种视图共用同一块格子，避免样式走偏
+function calTile(cls, label, shown, attrs) {
+    return `<div class="ret-cal-cell ${cls}"${attrs || ''}>
+        <span class="rc-month">${_esc(label)}</span>
+        <span class="rc-val">${_esc(shown || '')}</span>
+    </div>`;
+}
+
+// 正负决定配色；val 为 null 表示"算不出"，用灰色 + —
+function tileCls(val, has) {
+    if (!has) return 'none';
+    if (val === null || val === undefined) return 'unknown';
+    return val > 0 ? 'up' : (val < 0 ? 'down' : 'flat');
+}
+
 function renderReturnCalendar() {
     const card = document.getElementById('retCalCard');
     if (!card) return;
-    const year = returnCalYear();
     const months = returnMonths();
-    // 那一年完全没记录就别摆一格空日历
-    if (!year || !months.some(m => m.slice(0, 4) === String(year))) { card.classList.add('hidden'); return; }
+    const years = returnCalYears();
+    if (!years.length) { card.classList.add('hidden'); return; }
     card.classList.remove('hidden');
 
     const rate = state.returnCalMetric === 'rate';
-    const cells = [];
-    let amountTotal = 0;
-    for (let m = 1; m <= 12; m++) {
-        const key = `${year}-${String(m).padStart(2, '0')}`;
-        const has = months.indexOf(key) >= 0;
-        const amount = has ? returnSummary([key]).total : 0;
-        amountTotal += amount;
-        const st = has ? portfolioMonthStats(key) : null;
-        const r = st ? st.rate : null;
-        const val = rate ? r : amount;
-        let cls = 'none';
-        if (has && val !== null && val !== undefined) {
-            cls = val > 0 ? 'up' : (val < 0 ? 'down' : 'flat');
-        } else if (has) {
-            cls = 'unknown';       // 有收益记录，但本金未知算不出率
-        }
-        const shown = rate ? pctText(r) : (has ? formatCurrency(amount) : '—');
-        cells.push(`<div class="ret-cal-cell ${cls}"${has ? ` data-ret-cal-month="${key}" role="button" tabindex="0"` : ''}>
-            <span class="rc-month">${CN_MONTHS[m - 1]}</span>
-            <span class="rc-val">${has ? _esc(shown) : ''}</span>
-        </div>`);
+    const byYear = state.returnCalMode === 'year';
+    const year = returnCalYear();
+
+    // 年份下拉只在月收益视图有意义
+    const ySel = document.getElementById('retCalYearSelect');
+    if (ySel) {
+        ySel.classList.toggle('hidden', byYear);
+        ySel.innerHTML = years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+        ySel.value = String(year);
     }
-    document.getElementById('retCalTitle').textContent = `${year} 年`;
+
+    const cells = [];
+    let amountTotal = 0, cum = null;
+
+    if (byYear) {
+        years.forEach(y => {
+            const ms = months.filter(m => m.slice(0, 4) === String(y));
+            const amount = returnSummary(ms).total;
+            const r = portfolioCumulative(ms).cumulative;
+            const val = rate ? r : amount;
+            cells.push(calTile(tileCls(val, true), `${y} 年`,
+                rate ? pctText(r) : formatCurrency(amount),
+                ` data-ret-cal-year="${y}" role="button" tabindex="0"`));
+        });
+        amountTotal = returnSummary(months).total;
+        cum = portfolioCumulative(months);
+    } else {
+        for (let m = 1; m <= 12; m++) {
+            const key = `${year}-${String(m).padStart(2, '0')}`;
+            const has = months.indexOf(key) >= 0;
+            const amount = has ? returnSummary([key]).total : 0;
+            amountTotal += amount;
+            const st = has ? portfolioMonthStats(key) : null;
+            const r = st ? st.rate : null;
+            const val = rate ? r : amount;
+            cells.push(calTile(tileCls(val, has), CN_MONTHS[m - 1],
+                rate ? (has ? pctText(r) : '') : (has ? formatCurrency(amount) : ''),
+                has ? ` data-ret-cal-month="${key}" role="button" tabindex="0"` : ''));
+        }
+        cum = portfolioCumulative(months.filter(m => m.slice(0, 4) === String(year)));
+    }
+
     document.getElementById('retCalGrid').innerHTML = cells.join('');
 
-    const cum = portfolioCumulative(months.filter(m => m.slice(0, 4) === String(year)));
     const totalEl = document.getElementById('retCalTotal');
     if (rate) {
-        totalEl.innerHTML = `本年累计收益率 <b class="${(cum.cumulative || 0) >= 0 ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
+        const ok = (cum.cumulative || 0) >= 0;
+        totalEl.innerHTML = `${byYear ? '全部累计收益率' : '本年累计收益率'} <b class="${ok ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
     } else {
-        totalEl.innerHTML = `当年收益 <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${formatCurrency(amountTotal)}</b>`;
+        totalEl.innerHTML = `${byYear ? '全部收益' : '当年收益'} <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${formatCurrency(amountTotal)}</b>`;
     }
     const note = document.getElementById('retCalNote');
-    note.textContent = rate
-        ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率'
-        : '空白 = 该月没记录';
+    if (byYear) {
+        note.textContent = rate ? '点年份看该年各月；— = 该年本金未知算不出' : '点年份看该年各月';
+    } else {
+        note.textContent = rate
+            ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率'
+            : '空白 = 该月没记录';
+    }
 
     document.querySelectorAll('#retCalGrid [data-ret-cal-month]').forEach(cell => {
         const open = () => openReturnDetailForMonth(cell.dataset.retCalMonth);
+        cell.addEventListener('click', open);
+        cell.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+    document.querySelectorAll('#retCalGrid [data-ret-cal-year]').forEach(cell => {
+        const open = () => { state.returnCalYear = Number(cell.dataset.retCalYear); setReturnCalMode('month'); };
         cell.addEventListener('click', open);
         cell.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
     });
@@ -7970,6 +8029,14 @@ function initReturnListeners() {
     });
     document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(btn => {
         btn.addEventListener('click', () => setReturnCalMetric(btn.dataset.retCalMetric));
+    });
+    document.querySelectorAll('#retCalMode [data-ret-cal-mode]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnCalMode(btn.dataset.retCalMode));
+    });
+    const calYearSel = document.getElementById('retCalYearSelect');
+    if (calYearSel) calYearSel.addEventListener('change', e => {
+        state.returnCalYear = Number(e.target.value);
+        renderReturnCalendar();
     });
     const ySel = document.getElementById('returnYearSelect');
     if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });

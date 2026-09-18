@@ -3687,6 +3687,12 @@ table.bill-stats {
 .ret-cal-cell[role="button"] { cursor: pointer; }
 .ret-cal-cell[role="button"]:hover { filter: brightness(1.06); }
 .ret-cal-cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 头部三组控件并排：月/年切换 · 年份 · 金额/率切换 */
+.ret-cal-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ret-cal-head #retCalMetric { margin-left: auto; }
+.ret-cal-head select.filter-select { flex: 0 0 auto; }
+.ret-cal-head select.hidden { display: none; }
+
 .ret-cal-foot {
     display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
     margin-top: 12px; font-size: 13px; color: var(--text-secondary); flex-wrap: wrap;

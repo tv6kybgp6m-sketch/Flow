@@ -530,11 +530,12 @@
                         <div class="drill-chart-empty hidden" id="returnChartEmpty"></div>
                     </div>
                     <div class="chart-card ret-cal-card hidden" id="retCalCard">
-                        <div class="chart-header">
-                            <div class="drill-title-wrap">
-                                <h3 id="retCalTitle">月度收益</h3>
-                                <span class="chart-subtitle" id="retCalSubtitle">点月份查看该月各账户明细</span>
+                        <div class="chart-header ret-cal-head">
+                            <div class="drill-toggle" id="retCalMode">
+                                <button class="gran-btn active" data-ret-cal-mode="month">月收益</button>
+                                <button class="gran-btn" data-ret-cal-mode="year">年收益</button>
                             </div>
+                            <select class="filter-select" id="retCalYearSelect" title="选择年份"></select>
                             <div class="drill-toggle" id="retCalMetric">
                                 <button class="gran-btn active" data-ret-cal-metric="amount">收益额</button>
                                 <button class="gran-btn" data-ret-cal-metric="rate">收益率</button>
@@ -762,7 +763,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.31.0</div>
+                                    <div class="about-version">版本 1.31.1</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1208,7 +1209,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.31.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.31.1').catch(() => {});
             });
         }
     </script>
