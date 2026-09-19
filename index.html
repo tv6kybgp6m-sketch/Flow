@@ -527,6 +527,25 @@
                         </div>
                         <div class="drill-chart-empty hidden" id="returnChartEmpty"></div>
                     </div>
+                    <div class="chart-card tac-card hidden" id="tacCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>总资产变动 <span class="tac-period" id="tacPeriodLabel"></span></h3>
+                            </div>
+                            <div class="drill-toggle" id="tacTabs">
+                                <button class="gran-btn active" data-tac-tab="stats">区间统计</button>
+                                <button class="gran-btn" data-tac-tab="trend">变动趋势</button>
+                            </div>
+                        </div>
+                        <div class="tac-stats" id="tacStats"></div>
+                        <div class="tac-trend hidden">
+                            <div class="chart-container">
+                                <canvas id="tacChart"></canvas>
+                            </div>
+                            <div class="drill-chart-empty hidden" id="tacChartEmpty"></div>
+                        </div>
+                        <div class="tac-note" id="tacNote"></div>
+                    </div>
                     <div class="chart-card ret-cal-card hidden" id="retCalCard">
                         <div class="chart-header ret-cal-head">
                             <div class="drill-toggle" id="retCalMode">
@@ -761,7 +780,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.32.0</div>
+                                    <div class="about-version">版本 1.33.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1207,7 +1226,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.32.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.33.0').catch(() => {});
             });
         }
     </script>

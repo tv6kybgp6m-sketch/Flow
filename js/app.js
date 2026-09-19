@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.32.0';
+const APP_VERSION = '1.33.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -166,6 +166,7 @@ let state = {
     returnMonth: null,
     returnChartType: 'bar',
     returnCalMetric: 'amount',   // 月度格子：收益额 / 收益率
+    tacTab: 'stats',           // 总资产变动模块：区间统计 / 变动趋势
     returnMetric: 'amount',      // 主图：收益额 / 收益率
     returnCalMode: 'month',      // 月度格子：月收益（12 格）/ 年收益（按年一格）
     returnCalYear: null,         // 月收益视图看哪一年；null = 跟随页面年份
@@ -7211,10 +7212,148 @@ function dismissCaliberNote() {
     renderCaliberNote();
 }
 
+// ==================== 总资产变动 ====================
+// 跟随页面顶部的 月报 / 年报 / 总：月份区间直接取 returnPeriodInfo()
+function totalAssetChange() {
+    const info = returnPeriodInfo();
+    const months = (info.months || []).slice().sort();
+    const member = state.balanceOwner;
+    const assetAt = (m) => {
+        if (!m) return null;
+        const map = balancesAtMonth(m, member);
+        if (!Object.keys(map).length) return null;
+        return totalsFromMap(map).asset;
+    };
+    const first = months[0] || null;
+    const last = months[months.length - 1] || null;
+    // 看"总"时最早那个月就是起点；看月/年时起点是它的上个月
+    const openMonth = info.period === 'all' ? first : previousMonthOf(first);
+    const open = assetAt(openMonth);
+    const close = assetAt(last);
+
+    let flow = 0, flowKnown = false;
+    state.returns.forEach(r => {
+        if (!r.month || months.indexOf(r.month) < 0) return;
+        if (member !== 'all' && r.member !== member) return;
+        if (r.flow === undefined || r.flow === null || r.flow === '') return;
+        flow += Number(r.flow) || 0; flowKnown = true;
+    });
+    const profit = months.length ? returnSummary(months, member).total : 0;
+    const delta = (open === null || close === null) ? null : close - open;
+    // 剩下那截主要是日常收支和非投资账户的变动，不是"算错了"
+    const other = delta === null ? null : delta - flow - profit;
+    return { info, months, openMonth, open, close, flow, flowKnown, profit, delta, other };
+}
+
+function setTacTab(t) {
+    state.tacTab = t === 'trend' ? 'trend' : 'stats';
+    document.querySelectorAll('#tacTabs [data-tac-tab]').forEach(b =>
+        b.classList.toggle('active', b.dataset.tacTab === state.tacTab));
+    renderAssetChange();
+}
+
+function renderAssetChange() {
+    const card = document.getElementById('tacCard');
+    if (!card) return;
+    const t = totalAssetChange();
+    if (!t.months.length) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    document.getElementById('tacPeriodLabel').textContent = `（${t.info.title}）`;
+
+    const stats = document.getElementById('tacStats');
+    const trendBox = document.querySelector('#tacCard .tac-trend');
+    const showTrend = state.tacTab === 'trend';
+    stats.classList.toggle('hidden', showTrend);
+    trendBox.classList.toggle('hidden', !showTrend);
+
+    const mLabel = m => m ? m.replace('-', '年') + '月' : '—';
+    const signed = v => (v > 0 ? '+' : '') + formatCurrency(v);
+    const tiles = [
+        { k: '期初总资产', v: t.open, sub: t.open === null ? `${mLabel(t.openMonth)}未记余额` : mLabel(t.openMonth), plain: true },
+        { k: '净入金', v: t.flowKnown ? t.flow : null, sub: t.flowKnown ? '转入 − 转出（投资账户）' : '未录入' },
+        { k: '投资收益', v: t.profit, sub: '区间内各账户合计' },
+        { k: '其他变动', v: t.other, sub: '日常收支、非投资账户等' },
+        { k: '期末总资产', v: t.close, sub: mLabel(t.months[t.months.length - 1]), plain: true },
+    ];
+    let html = tiles.map(tile => {
+        const cls = tile.plain ? '' : (((tile.v || 0) > 0) ? ' up' : (((tile.v || 0) < 0) ? ' down' : ''));
+        const val = (tile.v === null || tile.v === undefined)
+            ? '<span class="tac-na">—</span>'
+            : (tile.plain ? _esc(formatCurrency(tile.v)) : _esc(signed(tile.v)));
+        return `<div class="tac-tile${cls}"><span class="tt-k">${_esc(tile.k)}</span>`
+            + `<span class="tt-v">${val}</span><span class="tt-s">${_esc(tile.sub)}</span></div>`;
+    }).join('');
+    const dCls = (t.delta || 0) > 0 ? ' up' : ((t.delta || 0) < 0 ? ' down' : '');
+    html += `<div class="tac-tile total${dCls}"><span class="tt-k">总资产变动</span>`
+        + `<span class="tt-v">${t.delta === null ? '<span class="tac-na">—</span>' : _esc(signed(t.delta))}</span>`
+        + `<span class="tt-s">${t.delta !== null && t.open ? (t.delta / t.open * 100).toFixed(2) + '%' : ''}</span></div>`;
+    stats.innerHTML = html;
+
+    const note = document.getElementById('tacNote');
+    note.innerHTML = t.open === null
+        ? `<i class="fa-solid fa-circle-info"></i> ${_esc(mLabel(t.openMonth))} 没记余额，期初取不到，"其他变动"也就算不出来 —— 补上那个月的余额这里才完整。`
+        : `<i class="fa-solid fa-circle-info"></i> "其他变动" = 期末 − 期初 − 净入金 − 投资收益，`
+          + `里面正常包含日常收支和现金 / 储蓄卡等非投资账户的变化，不是算错了。`;
+
+    if (showTrend) renderTacChart(t);
+}
+
+function renderTacChart(t) {
+    const canvas = document.getElementById('tacChart');
+    if (!canvas) return;
+    const draw = () => {
+        const member = state.balanceOwner;
+        // 起点那个月也画进去，才看得出"从哪儿变到哪儿"
+        const keys = (t.openMonth && t.months.indexOf(t.openMonth) < 0)
+            ? [t.openMonth].concat(t.months) : t.months.slice();
+        const series = keys.map(m => {
+            const map = balancesAtMonth(m, member);
+            return Object.keys(map).length ? Math.round(totalsFromMap(map).asset * 100) / 100 : null;
+        });
+        const empty = document.getElementById('tacChartEmpty');
+        if (series.filter(v => v !== null).length < 2) {
+            if (empty) { empty.textContent = '这段时间只有不到两个月记了余额，看不出趋势'; empty.classList.remove('hidden'); }
+            if (charts.assetChange) { charts.assetChange.destroy(); charts.assetChange = null; }
+            return;
+        }
+        if (empty) empty.classList.add('hidden');
+        if (charts.assetChange) { charts.assetChange.destroy(); charts.assetChange = null; }
+        const palette = chartPalette();
+        charts.assetChange = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: keys.map(m => m.replace('-', '年') + '月'),
+                datasets: [{
+                    data: series, borderColor: '#0a84ff', backgroundColor: 'rgba(10,132,255,0.10)',
+                    borderWidth: 2, fill: true, tension: 0.3, spanGaps: true,
+                    pointRadius: keys.length > 24 ? 0 : 3, pointHoverRadius: 6,
+                    pointBackgroundColor: '#0a84ff',
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c) => (c.raw === null || c.raw === undefined)
+                        ? '该月未记余额' : `总资产: ${formatCurrency(c.raw)}` } },
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: palette.text, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+                    y: { grid: { color: palette.grid }, ticks: { color: palette.text, font: { size: 10 },
+                        callback: (v) => (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) } },
+                },
+            },
+        });
+    };
+    if (typeof Chart === 'undefined') { loadChartLib().then(draw).catch(() => {}); return; }
+    draw();
+}
+
 function renderReturns() {
     if (!document.getElementById('view-returns')) return;
     renderReturnSelectors();
     renderCaliberNote();
+    renderAssetChange();
     renderReturnCalendar();
 
     const info = returnPeriodInfo();
@@ -8053,6 +8192,9 @@ function initReturnListeners() {
     });
     document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(btn => {
         btn.addEventListener('click', () => setReturnCalMetric(btn.dataset.retCalMetric));
+    });
+    document.querySelectorAll('#tacTabs [data-tac-tab]').forEach(btn => {
+        btn.addEventListener('click', () => setTacTab(btn.dataset.tacTab));
     });
     document.querySelectorAll('#retMetric [data-ret-metric]').forEach(btn => {
         btn.addEventListener('click', () => setReturnMetric(btn.dataset.retMetric));
