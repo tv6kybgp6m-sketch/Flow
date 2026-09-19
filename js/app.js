@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.0';
+const APP_VERSION = '1.33.1';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -870,6 +870,7 @@ async function syncToICloud() {
 // 云端那份：先压缩再加密；lastModified 放在封套顶层，Mac 端靠它挑最新文件
 async function buildCloudEnvelope(payload) {
     if (!LedgerCrypto.isEnabled()) return null;
+    beginAskCycle(1);
     try {
         await ensureUnlocked(LedgerCrypto.keyring(), '云同步需要解锁');
     } catch (e) {
@@ -909,6 +910,7 @@ async function resolveCloudPayload(raw) {
 // 手机导出的那份（以及 iOS 生成的"副本"）几乎永远竞争不过 → 看起来"识别不了"。
 // 从旧到新逐个合并：并集 + 墓碑后写优先，多合几份是幂等的，最后的删除也能生效。
 async function mergeAllCloud(reason) {
+    beginAskCycle(1);          // 整批文件合起来最多问一次口令
     let list = null;
     try {
         if (window.electronAPI && window.electronAPI.icloud
@@ -923,16 +925,22 @@ async function mergeAllCloud(reason) {
         const one = await resolveCloudPayload(await window.electronAPI.icloud.readData());
         list = one ? [one] : [];
     }
-    let changed = false, merged = 0;
+    let changed = false, merged = 0, locked = 0;
     for (const raw of list) {
-        const data = raw && LedgerCrypto.looksEncrypted(raw) ? await resolveCloudPayload(raw) : raw;
+        if (!raw) continue;
+        let data = raw;
+        if (LedgerCrypto.looksEncrypted(raw)) {
+            data = await resolveCloudPayload(raw);
+            if (!data) { locked++; continue; }        // 解不开的那些已经累计在 __remoteLastError 里
+        }
         if (!data || !data.data) continue;
         if (data.deviceId && data.deviceId === DEVICE_ID && list.length > 1) continue;  // 自己写的那份不必再合
         if (mergeRemoteData(data)) changed = true;
         merged++;
     }
     if (merged) iCloudLastSyncTime = Date.now();
-    return { changed, merged };
+    if (locked) __remoteLastError = `有 ${locked} 份加密文件解不开（口令不对或不是同一把钥匙）`;
+    return { changed, merged, locked };
 }
 
 async function handleICloudFileChange() {
@@ -1186,9 +1194,17 @@ function submitSecretModal() {
     closeSecretModal(v);
 }
 
+// 口令框的"配额"：一次用户操作里最多弹一轮。
+// 同步文件夹里可能躺着多份用不同主密钥加密的旧副本，批量合并时如果每份都弹一次，
+// 用户会被连环弹窗淹掉，而且点"取消"也停不下来（下一个文件继续弹）。
+let __askBudget = 1;
+function beginAskCycle(n) { __askBudget = n === undefined ? 1 : n; }
+
 // 有本机密钥就静默通过；没有就问到口令或恢复码（最多三次）
 async function ensureUnlocked(kring, why, force) {
     if (!force && await LedgerCrypto.hasLocalKey()) return true;
+    if (__askBudget <= 0) throw new Error('已取消');   // 这轮已经问过了，不再骚扰
+    __askBudget -= 1;
     const kr = kring || LedgerCrypto.keyring();
     const hint = (force ? '这台设备存的密钥开不了这份数据（可能两台设备各自开启过加密）。' : '')
         + (kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。');
@@ -1488,6 +1504,7 @@ async function encSetupAdvance() {
     }
 }
 async function rotateRecoveryCodeClick() {
+    beginAskCycle(1);
     try {
         await ensureUnlocked(null, '重发恢复码');
         const code = await LedgerCrypto.rotateRecoveryCode(null);
@@ -1697,6 +1714,7 @@ function openBackupFolderClick() {
 
 // 把一份 JSON 备份合并进当前账本
 async function applyImportedJSON(text) {
+    beginAskCycle(1);
     let parsed = null;
     try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
     if (LedgerCrypto.looksEncrypted(parsed)) {
@@ -1807,7 +1825,12 @@ async function syncFromICloudNow() {
     if (!isElectron() || !iCloudSyncEnabled) return;
     try {
         const r = await mergeAllCloud('manual');
-        if (r.merged === 0) { showToast('iCloud 文件夹里没有可读的账本', 'info'); return; }
+        if (r.merged === 0) {
+            showToast(r.locked ? `有 ${r.locked} 份加密文件解不开（口令不对，或不是同一把钥匙）`
+                              : 'iCloud 文件夹里没有可读的账本',
+                r.locked ? 'error' : 'info');
+            return;
+        }
         if (r.changed) {
             renderView(state.currentView);
             updateSidebarSummary();
@@ -7226,8 +7249,12 @@ function totalAssetChange() {
     };
     const first = months[0] || null;
     const last = months[months.length - 1] || null;
-    // 看"总"时最早那个月就是起点；看月/年时起点是它的上个月
-    const openMonth = info.period === 'all' ? first : previousMonthOf(first);
+    // 看"总"时，起点应该是"最早有余额记录的月份"本身 —— 余额可能比收益早好几个月，
+    // 用最早有收益的月份当起点会把中间那段变化吞掉
+    const balMs = balanceMonths();
+    const openMonth = info.period === 'all'
+        ? (balMs[0] || first)
+        : previousMonthOf(first);
     const open = assetAt(openMonth);
     const close = assetAt(last);
 
@@ -7272,7 +7299,7 @@ function renderAssetChange() {
         { k: '期初总资产', v: t.open, sub: t.open === null ? `${mLabel(t.openMonth)}未记余额` : mLabel(t.openMonth), plain: true },
         { k: '净入金', v: t.flowKnown ? t.flow : null, sub: t.flowKnown ? '转入 − 转出（投资账户）' : '未录入' },
         { k: '投资收益', v: t.profit, sub: '区间内各账户合计' },
-        { k: '其他变动', v: t.other, sub: '日常收支、非投资账户等' },
+        { k: '其他资产变动', v: t.other, sub: '日常收支 / 还贷款 / 非投资账户' },
         { k: '期末总资产', v: t.close, sub: mLabel(t.months[t.months.length - 1]), plain: true },
     ];
     let html = tiles.map(tile => {
@@ -7291,9 +7318,11 @@ function renderAssetChange() {
 
     const note = document.getElementById('tacNote');
     note.innerHTML = t.open === null
-        ? `<i class="fa-solid fa-circle-info"></i> ${_esc(mLabel(t.openMonth))} 没记余额，期初取不到，"其他变动"也就算不出来 —— 补上那个月的余额这里才完整。`
-        : `<i class="fa-solid fa-circle-info"></i> "其他变动" = 期末 − 期初 − 净入金 − 投资收益，`
-          + `里面正常包含日常收支和现金 / 储蓄卡等非投资账户的变化，不是算错了。`;
+        ? `<i class="fa-solid fa-circle-info"></i> ${_esc(mLabel(t.openMonth))} 没记余额，期初取不到，"其他资产变动"也就算不出来 —— 补上那个月的余额这里才完整。`
+        : `<i class="fa-solid fa-circle-info"></i> "其他资产变动" = 期末 − 期初 − 净入金 − 投资收益。`
+          + `它通常不等于 0，因为总资产里还包含：日常收支让现金 / 储蓄卡增减、`
+          + `<b>还房贷或信用卡</b>（现金减少但净资产不变，所以只体现在这里）、以及没录到收益的账户变动。`
+          + `想看扣掉负债后的口径，用资产负债页的「净资产变动」，那里的"待核对"才是严格对账。`;
 
     if (showTrend) renderTacChart(t);
 }
