@@ -507,21 +507,19 @@
                         </ul>
                     </div>
                     <div class="chart-card drill-card">
-                        <div class="chart-header">
-                            <div class="drill-title-wrap">
-                                <h3 id="retChartTitle">月度收益</h3>
-                                <span class="chart-subtitle" id="retChartSubtitle"></span>
+                        <div class="chart-header ret-chart-head">
+                            <div class="drill-toggle" id="retGranularity">
+                                <button class="gran-btn" data-ret-gran="month">按月</button>
+                                <button class="gran-btn" data-ret-gran="year">按年</button>
                             </div>
-                            <div class="drill-controls">
-                                <div class="drill-toggle" id="retGranularity">
-                                    <button class="gran-btn" data-ret-gran="month">按月</button>
-                                    <button class="gran-btn" data-ret-gran="year">按年</button>
-                                </div>
-                                <div class="drill-toggle chart-type-toggle">
-                                    <button class="type-ico-btn" data-ret-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
-                                    <button class="type-ico-btn" data-ret-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
-                                    <button class="type-ico-btn" data-ret-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
-                                </div>
+                            <div class="drill-toggle chart-type-toggle">
+                                <button class="type-ico-btn" data-ret-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
+                                <button class="type-ico-btn" data-ret-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
+                                <button class="type-ico-btn" data-ret-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
+                            </div>
+                            <div class="drill-toggle" id="retMetric">
+                                <button class="gran-btn active" data-ret-metric="amount">收益额</button>
+                                <button class="gran-btn" data-ret-metric="rate">收益率</button>
                             </div>
                         </div>
                         <div class="chart-container tall">
@@ -763,7 +761,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.31.1</div>
+                                    <div class="about-version">版本 1.32.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1209,7 +1207,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.31.1').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.32.0').catch(() => {});
             });
         }
     </script>

@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.31.1';
+const APP_VERSION = '1.32.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -166,6 +166,7 @@ let state = {
     returnMonth: null,
     returnChartType: 'bar',
     returnCalMetric: 'amount',   // 月度格子：收益额 / 收益率
+    returnMetric: 'amount',      // 主图：收益额 / 收益率
     returnCalMode: 'month',      // 月度格子：月收益（12 格）/ 年收益（按年一格）
     returnCalYear: null,         // 月收益视图看哪一年；null = 跟随页面年份
     returnGran: null,
@@ -7162,6 +7163,17 @@ function setReturnChartType(t) {
     renderReturnChart();
 }
 
+function setReturnMetric(m) {
+    state.returnMetric = m === 'rate' ? 'rate' : 'amount';
+    // 切到收益率时饼图无意义，退回柱状
+    if (state.returnMetric === 'rate' && state.returnChartType === 'pie') state.returnChartType = 'bar';
+    document.querySelectorAll('#retMetric [data-ret-metric]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retMetric === state.returnMetric));
+    document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retChart === state.returnChartType));
+    renderReturnChart();
+}
+
 function activeReturnGran() {
     if (state.returnGran) return state.returnGran;
     return state.returnPeriod === 'year' || state.returnPeriod === 'all' ? 'year' : 'month';
@@ -7410,12 +7422,10 @@ function returnHideEmpty() {
 
 function renderReturnChart() {
     const info = returnPeriodInfo();
-    const title = document.getElementById('retChartTitle');
-    const sub = document.getElementById('retChartSubtitle');
     const chartType = state.returnChartType;
-    const gran = activeReturnGran();
-    if (title) title.textContent = chartType === 'pie' ? '账户收益构成' : (gran === 'year' ? '年度收益' : '月度收益');
-    if (sub) sub.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
+    // 收益率没有"构成占比"可言，饼图在这个模式下直接收起
+    const pieBtn = document.querySelector('#view-returns [data-ret-chart="pie"]');
+    if (pieBtn) pieBtn.classList.toggle('hidden', state.returnMetric === 'rate');
 
     if (!returnMonths().length) {
         returnShowEmpty('还没有记录过收益，点右上角「记收益」开始');
@@ -7435,19 +7445,31 @@ function renderReturnTrend(ctx, chartType) {
     if (typeof Chart === 'undefined') { loadChartLib().then(() => renderReturnTrend(ctx, chartType)).catch(() => {}); return; }
     if (charts.returns) { charts.returns.destroy(); charts.returns = null; }
     const buckets = returnTrendBuckets();
-    const values = buckets.map(b => Math.round(returnSummary(b.months).total * 100) / 100);
+    const rate = state.returnMetric === 'rate';
+    // 收益率：单月直接取该月的率；跨年汇总用逐月连乘，不能相加
+    const values = buckets.map(b => {
+        if (!rate) return Math.round(returnSummary(b.months).total * 100) / 100;
+        if (b.months.length === 1) return portfolioMonthStats(b.months[0]).rate;
+        return portfolioCumulative(b.months).cumulative;
+    });
+    // 百分比数值（null = 本金未知，留空不画）
+    const plotted = values.map(v => (v === null || v === undefined) ? null : (rate ? Math.round(v * 10000) / 100 : v));
     const palette = chartPalette();
     if (!buckets.length) { returnShowEmpty('该期间没有收益记录'); return; }
     returnHideEmpty();
-    const accent = values.map(v => v < 0 ? '#ff3b30' : '#34c759');
+    if (rate && plotted.every(v => v === null)) {
+        returnShowEmpty('这些月份的本金未知（缺上月余额），算不出收益率——先去「资产负债」补上余额');
+        return;
+    }
+    const accent = plotted.map(v => v === null ? '#c7c7cc' : (v < 0 ? '#ff3b30' : '#34c759'));
 
     charts.returns = new Chart(ctx, {
         type: chartType,
         data: {
             labels: buckets.map(b => b.label),
             datasets: [{
-                label: '收益',
-                data: values,
+                label: rate ? '收益率' : '收益',
+                data: plotted,
                 borderColor: '#34c759',
                 backgroundColor: chartType === 'line' ? 'rgba(52,199,89,0.12)' : accent,
                 borderWidth: chartType === 'line' ? 2 : 0,
@@ -7474,7 +7496,9 @@ function renderReturnTrend(ctx, chartType) {
             },
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: (c) => `收益: ${formatCurrency(c.raw)}` } },
+                tooltip: { callbacks: { label: (c) => c.raw === null || c.raw === undefined
+                    ? '本金未知，算不出收益率'
+                    : (rate ? `收益率: ${c.raw.toFixed(2)}%` : `收益: ${formatCurrency(c.raw)}`) } },
             },
             scales: {
                 x: {
@@ -7483,7 +7507,7 @@ function renderReturnTrend(ctx, chartType) {
                 },
                 y: {
                     grid: { color: palette.grid },
-                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) },
+                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => rate ? (v + '%') : (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) },
                 },
             },
         },
@@ -8029,6 +8053,9 @@ function initReturnListeners() {
     });
     document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(btn => {
         btn.addEventListener('click', () => setReturnCalMetric(btn.dataset.retCalMetric));
+    });
+    document.querySelectorAll('#retMetric [data-ret-metric]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnMetric(btn.dataset.retMetric));
     });
     document.querySelectorAll('#retCalMode [data-ret-cal-mode]').forEach(btn => {
         btn.addEventListener('click', () => setReturnCalMode(btn.dataset.retCalMode));
