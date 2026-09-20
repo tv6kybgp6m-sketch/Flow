@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.6';
+const APP_VERSION = '1.33.7';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5991,7 +5991,7 @@ function showDeleteGuard(opt) {
     document.getElementById('guardRows').innerHTML = (opt.rows || []).map(r =>
         `<div class="guard-row"><span>${_esc(r.k)}</span><b>${_esc(String(r.v))}</b></div>`).join('');
     document.getElementById('guardActions').innerHTML = __guardActions.map((a, i) =>
-        `<button class="${a.primary ? 'primary-btn' : 'secondary-btn'}" data-guard="${i}">${_esc(a.label)}</button>`
+        `<button class="${a.primary ? 'primary-btn' : 'secondary-btn'}${a.danger ? ' guard-danger' : ''}" data-guard="${i}">${_esc(a.label)}</button>`
     ).join('') + `<button class="link-btn" data-guard-close>知道了</button>`;
     document.getElementById('guardActions').querySelectorAll('[data-guard]').forEach(b =>
         b.addEventListener('click', () => runDeleteGuard(Number(b.dataset.guard))));
@@ -6030,12 +6030,36 @@ function guardAccountWithRecords(a) {
         actions.push({ label: '去看这些余额', fn: () => { switchView('balance'); openAccountHistoryForAccount(a.id); } }); }
     if (c.ret) { rows.push({ k: '收益记录（投资收益）', v: c.ret + ' 期' });
         actions.push({ label: '去看这些收益', fn: () => { switchView('returns'); openReturnHistoryForAccount(a.id); } }); }
+    actions.push({ label: `一键清空这 ${c.bal + c.ret} 条记录`, danger: true, fn: () => clearAccountRecords(a.id) });
     showDeleteGuard({
         title: `「${a.name}」还挂着 ${c.bal + c.ret} 条记录，删不掉`,
-        sub: '要删账户，得先把这些记录一条条删掉（每条删的时候都有撤销）。',
+        sub: '可以一条条删掉，也可以一键清空（两种方式删完都有 8 秒撤销）。清空后这个账户就能删了。',
         rows, actions,
     });
     return true;
+}
+
+// 一键清空某账户的余额 + 收益记录：写墓碑、进撤销栈，撤销时按 id 塞回去并清掉墓碑。
+function clearAccountRecords(accountId) {
+    const a = accountById(accountId);
+    if (!a) return;
+    const bal = state.balances.filter(b => b.accountId === accountId);
+    const ret = state.returns.filter(r => r.accountId === accountId);
+    const n = bal.length + ret.length;
+    if (!n) { showToast('这个账户已经没有记录了', 'info'); return; }
+    if (!confirm(`清空「${a.name}」的 ${n} 条记录？（余额 ${bal.length} 期 / 收益 ${ret.length} 期）\n清空后 8 秒内可以撤销。`)) return;
+    bal.forEach(b => addTombstone('balances', b.id));
+    ret.forEach(r => addTombstone('returns', r.id));
+    state.balances = state.balances.filter(b => b.accountId !== accountId);
+    state.returns = state.returns.filter(r => r.accountId !== accountId);
+    const label = `清空「${a.name}」的 ${n} 条记录`;
+    const canUndo = pushUndo(label, { balances: bal, returns: ret });
+    saveState();
+    renderView(state.currentView);
+    refreshAccountLists();
+    refreshAccountsModalIfOpen();
+    if (canUndo) showUndoToast(label);
+    else showToast('已清空', 'success');
 }
 
 function deleteAccountFromHistory(accountId) {

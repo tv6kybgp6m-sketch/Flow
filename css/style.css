@@ -3463,7 +3463,11 @@ table.bill-stats {
 .icon-btn:hover { background: var(--accent-light); color: var(--accent); }
 /* 带撤销按钮的提示条 */
 .toast.undo { display: flex; align-items: center; gap: 10px; }
+/* 提示条容器是 pointer-events:none（免得挡住下面的列表），但带「撤销」的那条必须把
+   命中收回来：不然点撤销会直接穿到下面的记录行上，既没撤销、还顺手打开了那条记录。 */
+.toast.undo { pointer-events: auto; }
 .toast-undo-btn {
+    pointer-events: auto;
     border: none; background: rgba(255,255,255,.22); color: #fff;
     padding: 3px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: var(--font);
 }
@@ -3836,3 +3840,4 @@ table.bill-stats {
 
 /* 删不掉的账户：垃圾桶换成小锁，别让人以为点了就能删 */
 .bh-delete.bh-blocked { color: var(--text-quaternary, var(--text-tertiary)); }
+.guard-actions .guard-danger { color: #ff3b30; border-color: rgba(255, 59, 48, .35); }
