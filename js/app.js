@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.2';
+const APP_VERSION = '1.33.3';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5980,7 +5980,14 @@ function removeAccount(accountId) {
 
 function closeAccountHistoryModal() {
     document.getElementById('accountHistoryModal').classList.add('hidden');
+    markHistoryModalReturnsTone(false);
     historyAccountId = null;
+}
+
+// 从投资收益页打开的明细弹窗用"盈利红、亏损绿"；从资产负债页打开的保持全局配色
+function markHistoryModalReturnsTone(on) {
+    const m = document.getElementById('accountHistoryModal');
+    if (m) m.classList.toggle('returns-tone', !!on);
 }
 
 // ---------------- 记余额 / 记收益的「年 + 月」选择 ----------------
@@ -7629,7 +7636,8 @@ function renderReturnTrend(ctx, chartType) {
         returnShowEmpty('这些月份的本金未知（缺上月余额），算不出收益率——先去「资产负债」补上余额');
         return;
     }
-    const accent = plotted.map(v => v === null ? '#c7c7cc' : (v < 0 ? '#ff3b30' : '#34c759'));
+    // 投资收益按 A 股习惯配色：盈利红、亏损绿
+    const accent = plotted.map(v => v === null ? '#c7c7cc' : (v < 0 ? '#34c759' : '#ff3b30'));
 
     charts.returns = new Chart(ctx, {
         type: chartType,
@@ -7638,14 +7646,14 @@ function renderReturnTrend(ctx, chartType) {
             datasets: [{
                 label: rate ? '收益率' : '收益',
                 data: plotted,
-                borderColor: '#34c759',
-                backgroundColor: chartType === 'line' ? 'rgba(52,199,89,0.12)' : accent,
+                borderColor: '#ff3b30',
+                backgroundColor: chartType === 'line' ? 'rgba(255,59,48,0.12)' : accent,
                 borderWidth: chartType === 'line' ? 2 : 0,
                 fill: chartType === 'line',
                 tension: 0.3,
                 pointRadius: buckets.length > 24 ? 0 : 3,
                 pointHoverRadius: 6,
-                pointBackgroundColor: '#34c759',
+                pointBackgroundColor: '#ff3b30',
                 borderRadius: 5,
                 maxBarThickness: 40,
             }],
@@ -7702,7 +7710,8 @@ function renderReturnPie(ctx, info) {
             labels: entries.map(e => e.name || accountById(e.id)?.name || '未知'),
             datasets: [{
                 data: entries.map(e => e.signed),
-                backgroundColor: entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.amount < 0 ? '#ff3b30' : (e.color || '#34c759'))),
+                // 投资收益按 A 股习惯：盈利红、亏损绿
+                backgroundColor: entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.amount < 0 ? '#34c759' : (e.color || '#ff3b30'))),
                 borderWidth: 0, hoverOffset: 10,
                 radius: (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520 ? '68%' : '100%',
             }],
@@ -7767,15 +7776,15 @@ function renderReturnBreakdown(info) {
                     <span class="breakdown-name">${r.name}</span>
                     <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
-                <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#ff3b30' : r.color}"></div></div>
+                <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#34c759' : r.color}"></div></div>
             </div>
         </div>`;
     }).join('');
 }
 
 // ==================== 月度收益格子（日历图）====================
-// 一年 12 格，红涨绿跌沿用 app 全局配色（不是券商软件的"红涨蓝跌"），
-// 免得同一屏里表格是绿的、格子是红的。
+// 一年 12 格。投资收益整页按 A 股习惯上色：盈利红、亏损绿（css 里 #view-returns 覆盖了全局的 .income/.expense），
+// 所以这里的格子、上面的图表和下面的排行是同一套颜色；交易记录、资产负债不受影响。
 const CN_MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
 
 function returnCalYears() {
@@ -7951,6 +7960,7 @@ function renderReturnMonthly() {
 function openReturnDetailForPeriod(months, label) {
     if (!months || !months.length) return;
     returnHistoryAccountId = null;
+    markHistoryModalReturnsTone(true);
     const { byAccount } = returnSummary(months);
     const rows = returnCandidateAccounts().map(a => ({
         id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
@@ -8005,6 +8015,7 @@ function openReturnHistoryForAccount(accountId, label) {
     if (!a) return;
     returnHistoryAccountId = accountId;
     historyAccountId = null;
+    markHistoryModalReturnsTone(true);
     const iconEl = document.getElementById('acctHistIcon');
     if (iconEl) {
         iconEl.style.background = `${a.color}22`;

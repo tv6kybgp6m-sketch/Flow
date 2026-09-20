@@ -3742,3 +3742,21 @@ table.bill-stats {
     .tac-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tac-tile.total { grid-column: 1 / -1; }
 }
+
+
+/* ---- 投资收益：按 A 股习惯，盈利红、亏损绿 ----
+   只作用于投资收益页和从它打开的明细弹窗；交易记录、资产负债等仍是"收入绿、支出红" */
+#view-returns .income,
+.returns-tone .income { color: var(--expense) !important; }
+#view-returns .expense,
+.returns-tone .expense { color: var(--income) !important; }
+#view-returns .ret-cal-cell.up,
+.returns-tone .ret-cal-cell.up { background: var(--expense); }
+#view-returns .ret-cal-cell.down,
+.returns-tone .ret-cal-cell.down { background: var(--income); }
+#view-returns .tac-tile.up .tt-v,
+.returns-tone .tac-tile.up .tt-v { color: var(--expense); }
+#view-returns .tac-tile.down .tt-v,
+.returns-tone .tac-tile.down .tt-v { color: var(--income); }
+#view-returns .breakdown-rate.income { color: var(--expense); }
+#view-returns .breakdown-rate.expense { color: var(--income); }
