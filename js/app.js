@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.5';
+const APP_VERSION = '1.33.6';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -372,7 +372,28 @@ function undoLastDelete() {
     Object.keys(op.rows).forEach(coll => {
         const items = op.rows[coll] || [];
         const bucket = UNDO_BUCKET[coll];
-        if (coll === 'paymentMethods') {
+        if (coll === 'memberMove') {
+            // 先按"并入后"的 id 删掉，再把原来的行塞回去（撞车被吃掉的那条也能复活）
+            items.forEach(mv => {
+                if (!Array.isArray(state[mv.coll])) return;
+                const gone = new Set(mv.ids || []);
+                state[mv.coll] = state[mv.coll].filter(r => !gone.has(r.id));
+                (mv.rows || []).forEach(r => {
+                    if (!state[mv.coll].some(x => x.id === r.id)) state[mv.coll].push(Object.assign({}, r));
+                });
+            });
+        } else if (coll === 'members') {
+            // 成员名单是字符串数组，且要连"添加时间"一起复活，否则会被自己的墓碑吃掉
+            items.forEach(name => {
+                if (!state.balanceMembers.includes(name)) {
+                    state.balanceMembers.push(name);
+                    state.memberAddedAt[name] = Date.now();
+                }
+                if (Array.isArray(state.deleted.members)) {
+                    state.deleted.members = state.deleted.members.filter(t => t.id !== name);
+                }
+            });
+        } else if (coll === 'paymentMethods') {
             items.forEach(name => {
                 if (!state.paymentMethods.includes(name)) {
                     state.paymentMethods.push(name);
@@ -397,6 +418,7 @@ function undoLastDelete() {
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
+    if (op.rows.members) { renderFamilyBars(); renderAccountManageList(); }
     showToast('已撤销：' + op.label, 'success');
     return true;
 }
@@ -5871,6 +5893,9 @@ function openAccountHistoryForAccount(accountId, fallbackName) {
         ? `${a.kind === 'asset' ? '资产' : '负债'} · ${a.group}` : '';
     const del = document.getElementById('acctHistDelete');
     del.style.display = a ? 'flex' : 'none';
+    const rc = accountRecordCounts(accountId), rn = rc.bal + rc.ret;
+    del.title = rn ? `还有 ${rn} 条记录，得先清掉才能删` : '删除账户';
+    del.classList.toggle('bh-blocked', !!rn);
     del.onclick = () => deleteAccountFromHistory(accountId);
     renderAccountHistory();
     document.getElementById('accountHistoryModal').classList.remove('hidden');
@@ -5951,13 +5976,75 @@ function deleteBalanceSnapshot(id) {
     else showToast('已删除该期余额', 'success');
 }
 
+// ==================== 「还有记录，删不掉」弹窗 ====================
+// 以前删账户只问一句"它的 N 期余额也会一并删除"就连带删光，而且 N 只数了余额、
+// 没数收益：一个只录过收益、没记过月末余额的账户，提示里连个数字都没有，等于静默清库。
+// 现在改成有记录就不给删，两类记录各多少条摆出来，再给跳到那些记录面前的按钮。
+let __guardActions = [];
+
+function showDeleteGuard(opt) {
+    const modal = document.getElementById('guardModal');
+    if (!modal) return false;
+    __guardActions = opt.actions || [];
+    document.getElementById('guardTitle').textContent = opt.title;
+    document.getElementById('guardSub').textContent = opt.sub || '';
+    document.getElementById('guardRows').innerHTML = (opt.rows || []).map(r =>
+        `<div class="guard-row"><span>${_esc(r.k)}</span><b>${_esc(String(r.v))}</b></div>`).join('');
+    document.getElementById('guardActions').innerHTML = __guardActions.map((a, i) =>
+        `<button class="${a.primary ? 'primary-btn' : 'secondary-btn'}" data-guard="${i}">${_esc(a.label)}</button>`
+    ).join('') + `<button class="link-btn" data-guard-close>知道了</button>`;
+    document.getElementById('guardActions').querySelectorAll('[data-guard]').forEach(b =>
+        b.addEventListener('click', () => runDeleteGuard(Number(b.dataset.guard))));
+    const x = document.getElementById('guardActions').querySelector('[data-guard-close]');
+    if (x) x.addEventListener('click', closeDeleteGuard);
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+    return true;
+}
+
+function runDeleteGuard(i) {
+    const a = __guardActions[i];
+    closeDeleteGuard();
+    if (a && typeof a.fn === 'function') a.fn();
+}
+
+function closeDeleteGuard() {
+    const modal = document.getElementById('guardModal');
+    if (modal) modal.classList.add('hidden');
+    __guardActions = [];
+}
+
+function accountRecordCounts(id) {
+    return {
+        bal: state.balances.filter(b => b.accountId === id).length,
+        ret: state.returns.filter(r => r.accountId === id).length,
+    };
+}
+
+// 有记录 → 弹窗拦下、返回 true；没记录 → 返回 false，调用方继续删
+function guardAccountWithRecords(a) {
+    const c = accountRecordCounts(a.id);
+    if (!c.bal && !c.ret) return false;
+    const rows = [], actions = [];
+    if (c.bal) { rows.push({ k: '余额记录（资产负债）', v: c.bal + ' 期' });
+        actions.push({ label: '去看这些余额', fn: () => { switchView('balance'); openAccountHistoryForAccount(a.id); } }); }
+    if (c.ret) { rows.push({ k: '收益记录（投资收益）', v: c.ret + ' 期' });
+        actions.push({ label: '去看这些收益', fn: () => { switchView('returns'); openReturnHistoryForAccount(a.id); } }); }
+    showDeleteGuard({
+        title: `「${a.name}」还挂着 ${c.bal + c.ret} 条记录，删不掉`,
+        sub: '要删账户，得先把这些记录一条条删掉（每条删的时候都有撤销）。',
+        rows, actions,
+    });
+    return true;
+}
+
 function deleteAccountFromHistory(accountId) {
     const a = accountById(accountId);
     if (!a) return;
-    if (!confirm(`确定删除账户「${a.name}」吗？其余额记录也会一并删除。`)) return;
+    if (guardAccountWithRecords(a)) return;
+    if (!confirm(`确定删除账户「${a.name}」吗？它名下已经没有余额和收益记录了。`)) return;
     removeAccount(accountId);
     closeAccountHistoryModal();
-    showToast('账户已删除', 'success');
 }
 
 function removeAccount(accountId) {
@@ -5970,13 +6057,16 @@ function removeAccount(accountId) {
     state.accounts = state.accounts.filter(a => a.id !== accountId);
     state.balances = state.balances.filter(b => b.accountId !== accountId);
     state.returns = state.returns.filter(r => r.accountId !== accountId);
-    if (acct) pushUndo(`账户「${acct.name}」`, {
+    const label = acct ? `账户「${acct.name}」` : '账户';
+    const canUndo = !!acct && pushUndo(label, {
         accounts: [acct], balances: goneBal, returns: goneRet,
     });
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
     refreshAccountsModalIfOpen();
+    // 以前删账户只弹一句"已删除"、没有撤销按钮，删错只能翻备份文件
+    if (canUndo) showUndoToast(label);
 }
 
 function closeAccountHistoryModal() {
@@ -6202,7 +6292,7 @@ function renderAccountManageList() {
         const rows = accountsSortedByKind(kind);
         return `
             <div class="account-section-title">${label}（${rows.length}）<span class="acct-order-hint">↑↓ 可调顺序</span></div>
-            ${rows.map((a, i) => `
+            ${rows.map((a, i) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
                 <div class="account-row">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
                     <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
@@ -6217,8 +6307,8 @@ function renderAccountManageList() {
                         <button class="acct-move" data-move-account="${a.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="上移"><i class="fa-solid fa-arrow-up"></i></button>
                         <button class="acct-move" data-move-account="${a.id}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''} title="下移"><i class="fa-solid fa-arrow-down"></i></button>
                     </span>
-                    <button class="bh-delete" onclick="deleteAccountFromList('${a.id}')" title="删除"><i class="fa-solid fa-trash"></i></button>
-                </div>`).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
+                    <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
+                </div>`; }).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
     }).join('');
 
     if (!box.$acctWired) {
@@ -6290,10 +6380,9 @@ function renameAccount(id) {
 function deleteAccountFromList(id) {
     const a = accountById(id);
     if (!a) return;
-    const count = state.balances.filter(b => b.accountId === id).length;
-    if (!confirm(`确定删除「${a.name}」吗？${count ? `它的 ${count} 期余额记录也会一并删除。` : ''}`)) return;
+    if (guardAccountWithRecords(a)) return;
+    if (!confirm(`确定删除「${a.name}」吗？它名下没有余额和收益记录，删掉不影响别的地方。`)) return;
     removeAccount(id);
-    showToast('账户已删除', 'success');
 }
 
 function refreshAccountLists() {
@@ -6901,23 +6990,77 @@ function _mergeMemberRows(list, from, to) {
     return list.filter(r => dropIds.indexOf(r.id) < 0);
 }
 
-function deleteBalanceMember(name) {
-    if (state.balanceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
-    const fallback = state.balanceMembers.find(m => m !== name);
-    const mineBal = state.balances.filter(b => b.member === name).length;
-    const mineRet = state.returns.filter(r => r.member === name).length;
-    const total = mineBal + mineRet;
-    if (!confirm(`删除成员「${name}」？${total ? `TA 的 ${total} 条记录（余额 ${mineBal} / 收益 ${mineRet}）会并入「${fallback}」。` : ''}`)) return;
-    state.balances = _mergeMemberRows(state.balances, name, fallback);
-    state.returns = _mergeMemberRows(state.returns, name, fallback);
+// 把某个成员名下的余额 / 收益记录整体挪到另一个成员名下（同月同账户撞车时以接手的那位为准）
+function transferMemberRecords(from, to) {
+    state.balances = _mergeMemberRows(state.balances, from, to);
+    state.returns = _mergeMemberRows(state.returns, from, to);
+}
+
+// 真正移除一个"名下已经没有记录"的成员。删除和撤销都走这里，别处不要自己改数组。
+// extraUndo：并入再删时把"哪些记录被搬走了"一起塞进撤销包，撤销才做得干净。
+function removeEmptyMember(name, extraUndo) {
     state.balanceMembers = state.balanceMembers.filter(m => m !== name);
-    addTombstone('members', name);          // 关键：不写墓碑的话，并集合并会把它带回来
     delete state.memberAddedAt[name];
+    addTombstone('members', name);          // 关键：不写墓碑的话，并集合并会把它带回来
     if (state.balanceOwner === name) state.balanceOwner = 'all';
+    const canUndo = pushUndo(`成员「${name}」`, Object.assign({ members: [name] }, extraUndo || {}));
     saveState();
     renderFamilyBars();
     renderAccountManageList();
     refreshAccountsModalIfOpen();
+    if (canUndo) showUndoToast(`成员「${name}」`);
+    else showToast('成员已删除', 'success');
+}
+
+function deleteBalanceMember(name) {
+    if (state.balanceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
+    const mineBal = state.balances.filter(b => b.member === name).length;
+    const mineRet = state.returns.filter(r => r.member === name).length;
+    if (mineBal + mineRet > 0) { guardMemberWithRecords(name, mineBal, mineRet); return; }
+    if (!confirm(`删除成员「${name}」？TA 名下没有任何记录，删掉只是去掉这个选项。`)) return;
+    removeEmptyMember(name);
+}
+
+// 和删账户同一套规矩：有记录就不给直接删，先说清有多少条、跳过去看，
+// 想省事就显式点"并入再删"，不再把它做成删除的隐藏副作用。
+function guardMemberWithRecords(name, mineBal, mineRet) {
+    const fallback = state.balanceMembers.find(m => m !== name);
+    const rows = [], actions = [];
+    if (mineBal) rows.push({ k: '余额记录', v: mineBal + ' 期' });
+    if (mineRet) rows.push({ k: '收益记录', v: mineRet + ' 条' });
+    actions.push({ label: '去看 TA 名下的记录', fn: () => {
+        state.balanceOwner = name;
+        renderBalance(); renderReturns();
+        switchView(mineBal ? 'balance' : 'returns');
+    } });
+    if (fallback) actions.push({ label: `并入「${fallback}」后再删`, primary: true, fn: () => mergeMemberAndDelete(name) });
+    showDeleteGuard({
+        title: `成员「${name}」名下还有 ${mineBal + mineRet} 条记录`,
+        sub: fallback ? `可以一条条删掉，也可以整体并入「${fallback}」再删这个成员。` : '至少保留一个成员。',
+        rows, actions,
+    });
+}
+
+function mergeMemberAndDelete(name) {
+    const fallback = state.balanceMembers.find(m => m !== name);
+    if (!fallback) { showToast('至少保留一个成员', 'error'); return; }
+    const n = state.balances.filter(b => b.member === name).length
+        + state.returns.filter(r => r.member === name).length;
+    if (!confirm(`把「${name}」名下的 ${n} 条记录并入「${fallback}」，然后删除这个成员？`)) return;
+    // 记下搬走之前的原样：并入时如果和接手人同月同账户撞车，TA 那条会被直接吃掉，
+    // 所以撤销不能只是"把 member 改回去"，得先按搬完的 id 删掉、再把原行塞回去。
+    const before = {};
+    const move = ['balances', 'returns'].map(coll => {
+        const rows = state[coll].filter(r => r.member === name).map(r => Object.assign({}, r));
+        before[coll] = rows;
+        return { coll, rows, ids: [] };
+    });
+    transferMemberRecords(name, fallback);
+    move.forEach(mv => {
+        const mine = new Set(before[mv.coll].map(r => `${fallback}__${r.accountId}__${r.month}`));
+        mv.ids = state[mv.coll].filter(r => mine.has(r.id)).map(r => r.id);
+    });
+    removeEmptyMember(name, { memberMove: move });
 }
 
 function renderFamilySummary() {

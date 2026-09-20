@@ -3812,3 +3812,27 @@ table.bill-stats {
     .rcr-v { font-size: 14px; }
     .rsl-actions { width: 100%; justify-content: flex-start; gap: 10px; }
 }
+
+
+/* ---- 「还有记录，删不掉」弹窗 ---- */
+.guard-modal { max-width: 420px; }
+.guard-rows { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 16px; }
+.guard-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-input);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.guard-row b { font-size: 15px; color: var(--text-primary); }
+.guard-actions { display: flex; flex-direction: column; gap: 8px; }
+.guard-actions .primary-btn,
+.guard-actions .secondary-btn { width: 100%; justify-content: center; }
+.guard-actions .link-btn { align-self: center; margin-top: 2px; }
+
+/* 删不掉的账户：垃圾桶换成小锁，别让人以为点了就能删 */
+.bh-delete.bh-blocked { color: var(--text-quaternary, var(--text-tertiary)); }
