@@ -3760,3 +3760,63 @@ table.bill-stats {
 .returns-tone .tac-tile.down .tt-v { color: var(--income); }
 #view-returns .breakdown-rate.income { color: var(--expense); }
 #view-returns .breakdown-rate.expense { color: var(--income); }
+
+
+/* ---- 投资收益顶部：一张卡里"金额 + 同一区间的收益率" ---- */
+.ret-sum { margin-bottom: 10px; }
+.ret-sum-card { gap: 4px; }
+.ret-card-rate {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 2px;
+}
+.rcr-k { font-size: 11.5px; color: var(--text-tertiary); }
+.rcr-note { margin-left: 4px; font-size: 10px; color: var(--text-quaternary, var(--text-tertiary)); opacity: .8; }
+.rcr-v { font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+.ret-sum-card .bal-asof { line-height: 1.45; }
+
+/* ---- 口径：卡片行下面的一行小字，详情可展开 ---- */
+.ret-scope { margin: -8px 0 16px; }
+.rsl-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+    background: var(--bg-card);
+    border-radius: var(--radius-md, 12px);
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+.rsl-tag {
+    flex: none;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 6px;
+    line-height: 18px;
+}
+.rsl-text { flex: 1 1 220px; min-width: 0; }
+.rsl-text b { color: var(--text-primary); }
+.rsl-actions { display: flex; align-items: center; gap: 12px; flex: none; flex-wrap: wrap; }
+.rsl-actions .link-btn { margin-top: 0; }
+.rsl-more { color: var(--text-tertiary); }
+.rsl-warn { color: #ff9500; }
+.rsl-warn .link-btn { display: inline; padding: 0; font-size: 12px; color: inherit; }
+.rsl-detail {
+    margin-top: 6px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md, 12px);
+    padding: 8px 12px;
+    font-size: 11.5px;
+    line-height: 1.6;
+}
+@media (max-width: 640px) {
+    .ret-card-rate { flex-direction: column; align-items: flex-start; gap: 0; }
+    .rcr-v { font-size: 14px; }
+    .rsl-actions { width: 100%; justify-content: flex-start; gap: 10px; }
+}

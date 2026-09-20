@@ -450,48 +450,8 @@
                         </div>
                     </div>
                     <div class="bal-member-bar" id="retMemberBar"></div>
-                    <div class="report-summary">
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label" id="retPeriodLabel">本月收益</span></div>
-                            <span class="report-value" id="retPeriodAmount">0</span>
-                            <div class="bal-asof" id="retPeriodHint"></div>
-                        </div>
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">上月收益</span></div>
-                            <span class="report-value" id="retPrevAmount">0</span>
-                            <div class="bal-asof" id="retMomHint"></div>
-                        </div>
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">本年收益</span></div>
-                            <span class="report-value" id="retYearAmount">0</span>
-                        </div>
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">累计收益</span></div>
-                            <span class="report-value" id="retTotalAmount">0</span>
-                            <div class="bal-asof" id="retMonthsHint"></div>
-                        </div>
-                    </div>
-                    <div class="report-summary ret-rate-row">
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">本月收益率</span></div>
-                            <span class="report-value" id="retRateMonth">—</span>
-                            <div class="bal-asof" id="retRateMonthHint"></div>
-                        </div>
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">累计收益率<div class="settings-sublabel">时间加权</div></span></div>
-                            <span class="report-value" id="retRateCum">—</span>
-                            <div class="bal-asof" id="retRateCumHint"></div>
-                        </div>
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">本年收益率<div class="settings-sublabel">当年各月连乘，不折算年化</div></span></div>
-                            <span class="report-value" id="retRateYear">—</span>
-                            <div class="bal-asof" id="retRateYearHint"></div>
-                        </div>
-                        <div class="report-card">
-                            <div class="report-card-top"><span class="report-label">口径</span></div>
-                            <div class="ret-scope-note" id="retScopeNote"></div>
-                        </div>
-                    </div>
+                    <div class="report-summary ret-sum" id="retSummary"></div>
+                    <div class="ret-scope" id="retScope"></div>
                     <div class="ret-check hidden" id="retCheckWarn"></div>
                     <div class="caliber-note" id="caliberNote">
                         <div class="cn-head">
@@ -780,7 +740,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.33.3</div>
+                                    <div class="about-version">版本 1.33.4</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1226,7 +1186,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.33.3').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.33.4').catch(() => {});
             });
         }
     </script>

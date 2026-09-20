@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.3';
+const APP_VERSION = '1.33.4';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -171,6 +171,7 @@ let state = {
     returnCalMode: 'month',      // 月度格子：月收益（12 格）/ 年收益（按年一格）
     returnCalYear: null,         // 月收益视图看哪一年；null = 跟随页面年份
     returnGran: null,
+    returnScopeOpen: false,      // 口径那行小字：详情是否展开
     balancePeriod: 'month',
     balanceYear: null,
     balanceMonth: null,
@@ -7393,171 +7394,183 @@ function renderReturns() {
     renderReturnCalendar();
 
     const info = returnPeriodInfo();
-    const cur = returnSummary(info.months);
-    const total = returnSummary(returnMonths()).total;
-    const years = returnYears();
-    const yearMonths = info.year ? returnMonths().filter(m => m.slice(0, 4) === String(info.year)) : [];
-    const yearTotal = info.year ? returnSummary(yearMonths).total : 0;
 
-    // 上期：月报=上一月，年报=上一年，总=最后一期的上一月
-    let prevMonths = [], prevLabel = '';
-    if (info.period === 'month' && info.month) {
-        const p = previousMonthOf(info.month);
-        prevMonths = p ? [p] : [];
-        prevLabel = p ? p.replace('-', '年') + '月' : '';
-    } else if (info.period === 'year' && info.year) {
-        const py = String(Number(info.year) - 1);
-        prevMonths = returnMonths().filter(m => m.slice(0, 4) === py);
-        prevLabel = `${py}年`;
-    }
-
-    const setText = (id, v) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.textContent = formatCurrency(v);
-        el.classList.toggle('income', v > 0);
-        el.classList.toggle('expense', v < 0);
-    };
-    const label = document.getElementById('retPeriodLabel');
-    const monthsWithData = returnMonths().length;
-    let periodValue = cur.total;
-    if (info.period === 'all') {
-        if (label) label.textContent = '月均收益';
-        periodValue = monthsWithData ? Math.round((total / monthsWithData) * 100) / 100 : 0;
-    } else {
-        if (label) label.textContent = info.period === 'year' ? '本年收益' : '本月收益';
-    }
-    setText('retPeriodAmount', periodValue);
-    setText('retTotalAmount', total);
-    setText('retYearAmount', info.period === 'year' ? cur.total : yearTotal);
-
-    const hint = document.getElementById('retPeriodHint');
-    if (hint) {
-        if (info.period === 'all') hint.textContent = monthsWithData ? `按 ${monthsWithData} 个月平均` : '';
-        else hint.textContent = info.months.length ? info.title : '该期未记录';
-    }
-    const prevEl = document.getElementById('retPrevAmount');
-    if (prevEl) {
-        if (prevMonths.length) {
-            const pv = returnSummary(prevMonths).total;
-            prevEl.textContent = formatCurrency(pv);
-            prevEl.classList.toggle('income', pv > 0);
-            prevEl.classList.toggle('expense', pv < 0);
-        } else {
-            prevEl.textContent = '—';
-            prevEl.classList.remove('income', 'expense');
-        }
-    }
-    const momEl = document.getElementById('retMomHint');
-    if (momEl) {
-        if (prevMonths.length) {
-            const diff = cur.total - returnSummary(prevMonths).total;
-            momEl.textContent = `${prevLabel} 环比 ${diff >= 0 ? '+' : ''}${formatCurrency(diff)}`;
-        } else {
-            momEl.textContent = '没有上一期数据';
-        }
-    }
-    const monthsHint = document.getElementById('retMonthsHint');
-    if (monthsHint) monthsHint.textContent = returnMonths().length ? `共 ${returnMonths().length} 个月有记录` : '';
+    // ---- 顶部四张卡：金额在上、同一区间的收益率在下；口径挪到卡片行下面 ----
+    renderReturnSummary(info);
+    renderReturnScope(info);
 
     renderReturnChart();
     renderReturnBreakdown(info);
     renderReturnMonthly();
     renderReturnMemberBar();
-    renderReturnRates(info);
     updateReturnToggleStates();
 }
 
-// 收益率卡片：组合口径（稳健理财 + 长期投资），不是全部资产账户
-function renderReturnRates(info) {
-    const setText = (id, txt, cls) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.textContent = txt;
-        if (cls !== undefined) {
-            el.classList.toggle('income', cls === 'up');
-            el.classList.toggle('expense', cls === 'down');
-        }
-    };
-    const ids = investmentAccountIds();
-    const cum = portfolioCumulative();
-    const cur = portfolioMonthStats(info.month, ids);
-    // 本年收益率 = 只看这一年的月份逐月连乘，不往外推
+// ==================== 投资收益顶部四张卡（金额 + 同区间收益率）====================
+// 一张卡里"上面金额、下面同一区间的收益率"，四张卡随时间档换一套指标：
+//   月报 = 本月 / 上月 / 当年 / 累计
+//   年报 = 当年 / 上一年 / 当年月均 / 累计
+//   总   = 月均 / 最新一个月 / 最后有记录的这一年 / 累计
+// 这么挑是为了不出现两张一模一样的卡（以前年报下第 1、3 张都叫"本年收益"），
+// 也不出现常年空白的卡（以前总览下"上月收益"没有上一期，一直是"—"）。
+function renderReturnSummary(info) {
+    const box = document.getElementById('retSummary');
+    if (!box) return;
+    const monthsAll = returnMonths();
     const nowYear = new Date().getFullYear();
-    const viewYear = info.selYear || info.year || nowYear;
-    const ytd = portfolioCumulative(returnMonths().filter(m => Number(m.slice(0, 4)) === Number(viewYear)));
+    const viewYear = Number(info.selYear || info.year || nowYear);
+    const monthsOf = y => monthsAll.filter(m => Number(m.slice(0, 4)) === Number(y));
+    const sumOf = list => returnSummary(list).total;
+    const namesOf = ids => ids.map(id => (accountById(id) || {}).name).filter(Boolean).join('、');
+    // 月均收益率 = 累计率开 n 次方（几何平均）。不做年化折算，那只会把人吓一跳。
+    const avgRateOf = list => {
+        const c = portfolioCumulative(list);
+        return c.cumulative !== null && c.months > 0 ? Math.pow(1 + c.cumulative, 1 / c.months) - 1 : null;
+    };
+    const ymd = m => m ? Number(m.slice(0, 4)) + '年' + Number(m.slice(5, 7)) + '月' : '';
 
-    const rateCls = r => (r === null ? undefined : (r > 0 ? 'up' : (r < 0 ? 'down' : undefined)));
-    setText('retRateMonth', pctText(cur.rate), rateCls(cur.rate));
-    setText('retRateCum', pctText(cum.cumulative), rateCls(cum.cumulative));
-    setText('retRateYear', pctText(ytd.cumulative), rateCls(ytd.cumulative));
+    // 本月（月报是选中的那个月，总览是最后一个有记录的月）
+    const mKey = info.month || monthsAll[monthsAll.length - 1] || null;
+    const mStat = mKey ? portfolioMonthStats(mKey) : { rate: null, reason: 'no-account', unknown: [], base: 0, flowKnown: false, flow: 0 };
+    const NO_RATE = {
+        'no-account': '还没有归类为稳健理财 / 长期投资的账户',
+        'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
+        'no-profit': '这个月没有收益记录',
+        'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
+        'zero-base': '本金为 0，算不出比率',
+    };
+    let monthHint;
+    if (!mKey) monthHint = '还没有收益记录';
+    else if (mStat.rate === null) monthHint = NO_RATE[mStat.reason] || '暂时算不出收益率';
+    else if (mStat.unknown.length) monthHint = `本金 ${formatCurrency(mStat.base)} · 未计入 ${namesOf(mStat.unknown)}（缺上月余额）`;
+    else if (mStat.flowKnown) monthHint = `本金 ${formatCurrency(mStat.base)} · 含净入金 ${formatCurrency(mStat.flow)}`;
+    else monthHint = `平均本金 ${formatCurrency(mStat.base)} · 未录入金（近似）`;
+    const monthCard = {
+        label: mKey ? `${ymd(mKey)} 收益` : '本月收益',
+        amount: mKey ? sumOf([mKey]) : 0, rate: mStat.rate, rateLabel: '本月收益率',
+        amountId: 'retMonthAmount', rateId: 'retMonthRate', hintId: 'retMonthHint', hint: monthHint,
+    };
 
-    const yh = document.getElementById('retRateYearHint');
-    if (yh) {
-        yh.textContent = ytd.months
-            ? `${viewYear} 年 ${ytd.months} 个月连乘${Number(viewYear) === nowYear ? '（至今）' : ''}`
-            : `${viewYear} 年还没有可计算的收益率`;
-    }
+    // 上一期：月报看上月，年报看去年
+    const prevM = mKey ? previousMonthOf(mKey) : null;
+    const pStat = prevM ? portfolioMonthStats(prevM) : null;
+    const prevMonthCard = {
+        label: prevM ? `${ymd(prevM)} 收益` : '上月收益',
+        amount: prevM ? sumOf([prevM]) : null, rate: pStat ? pStat.rate : null, rateLabel: '上月收益率',
+        amountId: 'retPrevAmount', rateId: 'retPrevRate', hintId: 'retPrevHint',
+        hint: prevM ? `环比 ${diffText(mKey, prevM)}` : '没有上一期数据',
+    };
+    const pyMonths = monthsOf(viewYear - 1);
+    const pyCum = portfolioCumulative(pyMonths);
+    const prevYearCard = {
+        label: `${viewYear - 1} 年收益`,
+        amount: pyMonths.length ? sumOf(pyMonths) : null, rate: pyMonths.length ? pyCum.cumulative : null,
+        rateLabel: `${viewYear - 1} 年收益率`,
+        amountId: 'retPrevAmount', rateId: 'retPrevRate', hintId: 'retPrevHint',
+        hint: pyMonths.length ? `${pyMonths.length} 个月有记录` : `${viewYear - 1} 年没有记录`,
+    };
 
-    const mh = document.getElementById('retRateMonthHint');
-    if (mh) {
-        const REASON = {
-            'no-account': '还没有归类为稳健理财 / 长期投资的账户',
-            'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
-            'no-profit': '这个月没有收益记录',
-            'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
-            'zero-base': '本金为 0，算不出比率',
-        };
-        if (cur.rate === null) {
-            mh.textContent = REASON[cur.reason] || '暂时算不出收益率';
-        } else if (cur.unknown.length) {
-            const names = cur.unknown.map(id => (accountById(id) || {}).name).filter(Boolean);
-            mh.textContent = `本金 ${formatCurrency(cur.base)} · 未计入 ${names.join('、')}（缺上月余额）`;
-        } else {
-            mh.textContent = cur.flowKnown
-                ? `本金 ${formatCurrency(cur.base)} · 含净入金 ${formatCurrency(cur.flow)}`
-                : `平均本金 ${formatCurrency(cur.base)} · 未录入金（近似）`;
-        }
-    }
-    const ch = document.getElementById('retRateCumHint');
-    if (ch) ch.textContent = cum.months ? `按 ${cum.months} 个有收益率的月份连乘` : '';
+    const yMonths = monthsOf(viewYear);
+    const yCum = portfolioCumulative(yMonths);
+    const yearCard = {
+        label: `${viewYear} 年收益`,
+        amount: sumOf(yMonths), rate: yCum.cumulative, rateLabel: `${viewYear} 年收益率`,
+        amountId: 'retYearAmount', rateId: 'retYearRate', hintId: 'retYearHint',
+        hint: yCum.months ? `${yCum.months} 个月连乘${viewYear === nowYear ? '（至今）' : ''}`
+            : (yMonths.length ? '这些月份本金未知，算不出率' : '这一年没有记录'),
+    };
 
-    const scope = document.getElementById('retScopeNote');
-    if (scope) {
-        const incCash = !!(state.settings && state.settings.returnIncludeCash);
-        const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
-        const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
-        const prevM = previousMonthOf(info.month);
-        const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
-        const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
-            && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
-            && !ids.includes(a.id)).map(a => a.name);
-        scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
-            + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}`
+    const avgList = info.period === 'year' ? yMonths : monthsAll;
+    const avgCum = portfolioCumulative(avgList);
+    const avgCard = {
+        label: info.period === 'year' ? `${viewYear} 年月均` : '月均收益',
+        amount: avgList.length ? Math.round(sumOf(avgList) / avgList.length * 100) / 100 : 0,
+        rate: avgRateOf(avgList), rateLabel: '月均收益率',
+        amountId: 'retAvgAmount', rateId: 'retAvgRate', hintId: 'retAvgHint',
+        hint: avgList.length ? `按 ${avgList.length} 个月平均${avgCum.months < avgList.length ? `（${avgCum.months} 个月能算出率）` : ''}`
+            : '还没有收益记录',
+    };
+
+    const cumAll = portfolioCumulative(monthsAll);
+    const totalCard = {
+        label: '累计收益', amount: sumOf(monthsAll), rate: cumAll.cumulative,
+        rateLabel: '累计收益率', rateNote: '时间加权',
+        amountId: 'retTotalAmount', rateId: 'retTotalRate', hintId: 'retMonthsHint',
+        hint: monthsAll.length ? `共 ${monthsAll.length} 个月有记录` : '还没有收益记录',
+    };
+
+    const slots = info.period === 'year' ? [yearCard, prevYearCard, avgCard, totalCard]
+        : info.period === 'all' ? [avgCard, monthCard, yearCard, totalCard]
+            : [monthCard, prevMonthCard, yearCard, totalCard];
+
+    box.innerHTML = slots.map(c => {
+        const amtCls = c.amount === null ? '' : (c.amount > 0 ? ' income' : (c.amount < 0 ? ' expense' : ''));
+        const rateCls = c.rate === null ? '' : (c.rate > 0 ? ' income' : (c.rate < 0 ? ' expense' : ''));
+        return `<div class="report-card ret-sum-card">
+            <div class="report-card-top"><span class="report-label">${_esc(c.label)}</span></div>
+            <span class="report-value${amtCls}" id="${c.amountId}">${c.amount === null || c.amount === undefined ? '—' : _esc(formatCurrency(c.amount))}</span>
+            <div class="ret-card-rate">
+                <span class="rcr-k">${_esc(c.rateLabel)}${c.rateNote ? `<span class="rcr-note">${_esc(c.rateNote)}</span>` : ''}</span>
+                <b class="rcr-v${rateCls}" id="${c.rateId}">${pctText(c.rate)}</b>
+            </div>
+            <div class="bal-asof" id="${c.hintId}">${_esc(c.hint || '')}</div>
+        </div>`;
+    }).join('');
+}
+
+// 环比那一小段文字（本月卡 vs 上月卡）
+function diffText(mKey, prevM) {
+    const d = returnSummary([mKey]).total - returnSummary([prevM]).total;
+    return `${d >= 0 ? '+' : ''}${formatCurrency(d)}`;
+}
+
+// ---- 口径：卡片行下面的一行小字，默认只露账户名单，「详情」里放排除项和开关 ----
+function renderReturnScope(info) {
+    const box = document.getElementById('retScope');
+    if (!box) return;
+    const ids = investmentAccountIds();
+    const incCash = !!(state.settings && state.settings.returnIncludeCash);
+    const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
+    const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
+    const mKey = info.month || returnMonths()[returnMonths().length - 1] || null;
+    const cur = mKey ? portfolioMonthStats(mKey) : { unknown: [] };
+    const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
+    const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
+        && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
+        && !ids.includes(a.id)).map(a => a.name);
+    const prevM = mKey ? previousMonthOf(mKey) : null;
+    const open = !!state.returnScopeOpen;
+
+    // 本金未知的账户是这一屏里唯一需要用户动手补的，所以留在折叠外面，不藏进详情
+    const warnTxt = missing.length
+        ? ` · <span class="rsl-warn">${_esc(missing.join('、'))} 本金未知，`
+            + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></span>`
+        : '';
+    const head = `<span class="rsl-tag">口径</span>`
+        + `<span class="rsl-text" id="retScopeNote">只统计<b>稳健理财 / 长期投资</b>${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
+        + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}${warnTxt}</span>`;
+    const toggles = `<span class="rsl-actions">`
+        + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
+        + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
+        + `<button class="link-btn rsl-more" id="retScopeMore">${open ? '收起' : '详情'}</button>`
+        + `</span>`;
+    const detail = open
+        ? `<div class="rsl-detail">`
             + (outFixed.length ? `<div class="ret-excluded">已排除固定资产：${_esc(outFixed.join('、'))}（市值大、一般不录收益）</div>` : '')
-            + (missing.length ? `<div class="ret-excluded">本金未知，暂时不算进收益率：${_esc(missing.join('、'))}`
-                + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></div>` : '')
-            + `<div class="ret-scope-toggles">`
-            + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
-            + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
-            + `</div>`;
-        const goBal = document.getElementById('retGoBalance');
-        if (goBal) goBal.addEventListener('click', () => {
-            switchView('balance');
-            openBalanceModal(prevM);
-        });
-        const t = document.getElementById('retScopeCash');
-        if (t) t.addEventListener('click', () => {
-            state.settings.returnIncludeCash = !state.settings.returnIncludeCash;
-            saveState(); renderReturns();
-        });
-        const tf = document.getElementById('retScopeFixed');
-        if (tf) tf.addEventListener('click', () => {
-            state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed;
-            saveState(); renderReturns();
-        });
-    }
+            + (missing.length ? `<div class="ret-excluded">上面标了"本金未知"的账户，是因为缺 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '上月')} 的余额，`
+                + `本月只能算收益金额、算不出收益率。</div>` : '')
+            + `<div class="ret-excluded">收益率只按"能算出本金"的月份逐月连乘（时间加权），本金未知的月份会被跳过，不会当成 0% 拖低结果。</div>`
+            + `</div>`
+        : '';
+    box.innerHTML = `<div class="rsl-head">${head}${toggles}</div>${detail}`;
 
+    const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+    bind('retScopeMore', () => { state.returnScopeOpen = !state.returnScopeOpen; saveState(); renderReturns(); });
+    bind('retGoBalance', () => { switchView('balance'); openBalanceModal(prevM); });
+    bind('retScopeCash', () => { state.settings.returnIncludeCash = !state.settings.returnIncludeCash; saveState(); renderReturns(); });
+    bind('retScopeFixed', () => { state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed; saveState(); renderReturns(); });
+
+    // 本月录的收益和"期末−期初−净入金"对不上时，当场说一声
     const warn = document.getElementById('retCheckWarn');
     if (warn) {
         if (cur.check) {
@@ -7572,7 +7585,6 @@ function renderReturnRates(info) {
         }
     }
 }
-
 function updateReturnToggleStates() {
     document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
         b.classList.toggle('active', b.dataset.retChart === state.returnChartType));
