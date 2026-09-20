@@ -3841,3 +3841,15 @@ table.bill-stats {
 /* 删不掉的账户：垃圾桶换成小锁，别让人以为点了就能删 */
 .bh-delete.bh-blocked { color: var(--text-quaternary, var(--text-tertiary)); }
 .guard-actions .guard-danger { color: #ff3b30; border-color: rgba(255, 59, 48, .35); }
+
+/* ---- 记录 / 账户的「修改」入口 ---- */
+.bh-edit {
+    border: none; background: none; cursor: pointer;
+    color: var(--text-tertiary); font-size: 13px; padding: 6px 8px; border-radius: 6px;
+}
+.bh-edit:hover { color: var(--accent); background: var(--bg-card-hover); }
+.bal-entry-row.be-editing { box-shadow: 0 0 0 2px var(--accent); border-radius: 12px; }
+.acct-edit-pair { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.acct-edit-actions { display: flex; gap: 10px; margin-top: 18px; }
+.acct-edit-actions .secondary-btn,
+.acct-edit-actions .primary-btn { flex: 1; justify-content: center; }

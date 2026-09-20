@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.7';
+const APP_VERSION = '1.33.8';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -416,11 +416,25 @@ function undoLastDelete() {
         }
     });
     saveState();
-    renderView(state.currentView);
-    refreshAccountLists();
-    if (op.rows.members) { renderFamilyBars(); renderAccountManageList(); }
+    refreshOpenSurfaces();
+    if (op.rows.members) renderAccountManageList();
     showToast('已撤销：' + op.label, 'success');
     return true;
+}
+
+// 撤销 / 删除之后，凡是"开着的面板"都要重画。
+// 以前只重画当前视图，结果账户管理弹窗里刚撤销回来的账户要关掉重开才看得见。
+function refreshOpenSurfaces() {
+    renderView(state.currentView);
+    refreshAccountLists();
+    // 账户列表整块重画很便宜，不做"开着才画"的判断：
+    // 以前就是这句偷懒，导致改了类型/分类之后弹窗里的下拉选项还留着旧数据。
+    renderAccountManageList();
+    const hist = document.getElementById('accountHistoryModal');
+    if (hist && !hist.classList.contains('hidden')) {
+        if (returnHistoryAccountId) renderReturnAccountHistory();
+        else if (historyAccountId) renderAccountHistory();
+    }
 }
 
 // 带「撤销」按钮的提示条
@@ -5893,6 +5907,8 @@ function openAccountHistoryForAccount(accountId, fallbackName) {
         ? `${a.kind === 'asset' ? '资产' : '负债'} · ${a.group}` : '';
     const del = document.getElementById('acctHistDelete');
     del.style.display = a ? 'flex' : 'none';
+    const editBtn = document.getElementById('acctHistEdit');
+    if (editBtn) { editBtn.style.display = a ? 'flex' : 'none'; editBtn.onclick = () => openAccountEdit(accountId); }
     const rc = accountRecordCounts(accountId), rn = rc.bal + rc.ret;
     del.title = rn ? `还有 ${rn} 条记录，得先清掉才能删` : '删除账户';
     del.classList.toggle('bh-blocked', !!rn);
@@ -5959,9 +5975,45 @@ function renderAccountHistory() {
             <div class="bal-history-row">
                 <span class="bh-month">${b.month.replace('-', '年')}月${all ? `<span class="bh-member">${_esc(b.member || '')}</span>` : ''}</span>
                 <span class="bh-amount">${formatCurrency(b.amount)}</span>
+                <button class="bh-edit" onclick="editBalanceRecord('${b.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
                 <button class="bh-delete" onclick="deleteBalanceSnapshot('${b.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
             </div>`).join('')
         : '<div class="breakdown-empty">该账户还没有记录过余额</div>';
+}
+
+// 「修改」不另做一套表单：直接打开那个月的录入面板（它本来就带着现值），
+// 再把成员切到这条记录的人、滚到这个账户并高亮，改完照原路保存覆盖。
+function editReturnRecord(id) {
+    const r = state.returns.find(x => x.id === id);
+    if (!r) { showToast('这条记录已经不在了', 'error'); return; }
+    closeAccountHistoryModal();
+    openReturnModal(r.month);
+    focusEntryRow('returnMemberSelect', r.member, 'returnEntryList', r.accountId);
+}
+
+function editBalanceRecord(id) {
+    const b = state.balances.find(x => x.id === id);
+    if (!b) { showToast('这条记录已经不在了', 'error'); return; }
+    closeAccountHistoryModal();
+    openBalanceModal(b.month);
+    focusEntryRow('balanceMemberSelect', b.member, 'balanceEntryList', b.accountId);
+}
+
+function focusEntryRow(memberSel, member, listId, accountId) {
+    const ms = document.getElementById(memberSel);
+    if (ms && member && ms.value !== member && Array.from(ms.options || []).some(o => o.value === member)) {
+        ms.value = member;
+        ms.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    setTimeout(() => {
+        const inp = document.querySelector('#' + listId + ' [data-account="' + accountId + '"]');
+        const row = inp && inp.closest ? inp.closest('.bal-entry-row') : null;
+        if (!row) return;
+        row.classList.add('be-editing');
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (inp.select) inp.select();
+        setTimeout(() => row.classList.remove('be-editing'), 5000);
+    }, 150);
 }
 
 function deleteBalanceSnapshot(id) {
@@ -5970,10 +6022,91 @@ function deleteBalanceSnapshot(id) {
     addTombstone('balances', id);
     state.balances = state.balances.filter(b => b.id !== id);
     saveState();
-    renderAccountHistory();
     renderBalance();
+    refreshOpenSurfaces();
     if (row && pushUndo('该期余额', { balances: [row] })) showUndoToast('该期余额');
     else showToast('已删除该期余额', 'success');
+}
+
+// ==================== 编辑单个账户（名称 / 类型 / 分类 / 图标 / 颜色）====================
+// 账户管理弹窗里也能改，但那是"一行一行扒拉着改"；这里给一个针对单个账户的完整表单，
+// 从账户历史、排行、月度明细点进来就能直接改，不用先关窗再去找那个列表。
+let editingAccountId = null;
+let acctEditDraft = { icon: 'fa-wallet', color: '#007aff' };
+
+function openAccountEdit(accountId) {
+    const a = accountById(accountId);
+    if (!a) { showToast('账户不存在', 'error'); return; }
+    editingAccountId = accountId;
+    acctEditDraft = { icon: a.icon || 'fa-wallet', color: a.color || '#007aff' };
+    document.getElementById('acctEditName').value = a.name;
+    document.getElementById('acctEditSub').textContent = `${a.group || (a.kind === 'liability' ? '负债' : '资产')} · ${(state.balances.filter(b => b.accountId === a.id).length)} 期余额 · ${(state.returns.filter(r => r.accountId === a.id).length)} 期收益`;
+    const kindSel = document.getElementById('acctEditKind');
+    kindSel.value = a.kind;
+    paintAcctEditGroups(a.kind, a.group);
+    renderAcctEditPickers();
+    const modal = document.getElementById('accountEditModal');
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+    setTimeout(() => { const n = document.getElementById('acctEditName'); if (n) { n.focus(); n.select(); } }, 60);
+}
+
+function paintAcctEditGroups(kind, want) {
+    const g = document.getElementById('acctEditGroup');
+    if (!g) return;
+    const list = groupsForKind(kind);
+    g.innerHTML = list.map(x => `<option value="${_esc(x)}" ${x === want ? 'selected' : ''}>${_esc(x)}</option>`).join('');
+}
+
+function renderAcctEditPickers() {
+    const icons = document.getElementById('acctEditIcons');
+    if (icons) icons.innerHTML = ACCOUNT_ICON_CHOICES.map(i =>
+        `<div class="icon-pick-item ${i === acctEditDraft.icon ? 'selected' : ''}" data-icon="${i}"><i class="fa-solid ${i}"></i></div>`).join('');
+    const colors = document.getElementById('acctEditColors');
+    if (colors) colors.innerHTML = COLOR_OPTIONS.map(c =>
+        `<div class="color-pick-item ${c === acctEditDraft.color ? 'selected' : ''}" data-color="${c}" style="background:${c}"></div>`).join('');
+}
+
+function closeAccountEdit() {
+    const modal = document.getElementById('accountEditModal');
+    if (modal) modal.classList.add('hidden');
+    editingAccountId = null;
+}
+
+function saveAccountEdit() {
+    const a = accountById(editingAccountId);
+    if (!a) { closeAccountEdit(); return; }
+    const name = (document.getElementById('acctEditName').value || '').trim();
+    if (!name) { showToast('名称不能为空', 'error'); return; }
+    if (state.accounts.some(x => x.id !== a.id && String(x.name).trim() === name)) {
+        showToast(`已经有叫「${name}」的账户了`, 'error'); return;
+    }
+    const kind = document.getElementById('acctEditKind').value === 'liability' ? 'liability' : 'asset';
+    let group = document.getElementById('acctEditGroup').value;
+    if (!groupsForKind(kind).includes(group)) group = groupsForKind(kind)[0];
+    Object.assign(a, { name, kind, group, icon: acctEditDraft.icon, color: acctEditDraft.color, updatedAt: Date.now() });
+    ensureAccountOrder();
+    saveState();
+    refreshOpenSurfaces();
+    closeAccountEdit();
+    showToast(`已保存「${name}」`, 'success');
+}
+
+function initAccountEditModal() {
+    const kind = document.getElementById('acctEditKind');
+    if (kind) kind.addEventListener('change', () => paintAcctEditGroups(kind.value, groupsForKind(kind.value)[0]));
+    const icons = document.getElementById('acctEditIcons');
+    if (icons) icons.addEventListener('click', e => {
+        const el = e.target.closest ? e.target.closest('[data-icon]') : null;
+        if (!el) return;
+        acctEditDraft.icon = el.dataset.icon; renderAcctEditPickers();
+    });
+    const colors = document.getElementById('acctEditColors');
+    if (colors) colors.addEventListener('click', e => {
+        const el = e.target.closest ? e.target.closest('[data-color]') : null;
+        if (!el) return;
+        acctEditDraft.color = el.dataset.color; renderAcctEditPickers();
+    });
 }
 
 // ==================== 「还有记录，删不掉」弹窗 ====================
@@ -6055,9 +6188,7 @@ function clearAccountRecords(accountId) {
     const label = `清空「${a.name}」的 ${n} 条记录`;
     const canUndo = pushUndo(label, { balances: bal, returns: ret });
     saveState();
-    renderView(state.currentView);
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    refreshOpenSurfaces();
     if (canUndo) showUndoToast(label);
     else showToast('已清空', 'success');
 }
@@ -6086,9 +6217,7 @@ function removeAccount(accountId) {
         accounts: [acct], balances: goneBal, returns: goneRet,
     });
     saveState();
-    renderView(state.currentView);
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    refreshOpenSurfaces();
     // 以前删账户只弹一句"已删除"、没有撤销按钮，删错只能翻备份文件
     if (canUndo) showUndoToast(label);
 }
@@ -6331,6 +6460,7 @@ function renderAccountManageList() {
                         <button class="acct-move" data-move-account="${a.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="上移"><i class="fa-solid fa-arrow-up"></i></button>
                         <button class="acct-move" data-move-account="${a.id}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''} title="下移"><i class="fa-solid fa-arrow-down"></i></button>
                     </span>
+                    <button class="bh-edit" onclick="openAccountEdit('${a.id}')" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
                     <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
                 </div>`; }).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
     }).join('');
@@ -6395,9 +6525,8 @@ function renameAccount(id) {
     a.name = name.trim();
     a.updatedAt = Date.now();
     saveState();
-    renderAccountManageList();
-    refreshAccountsModalIfOpen();
-    renderBalance();
+    // 改名会牵动所有页面（排行、日历、预算…），统一走"开着的面板全部重画"
+    refreshOpenSurfaces();
     showToast('已重命名', 'success');
 }
 
@@ -6492,9 +6621,8 @@ function changeAccountGroup(id, group) {
     a.group = group;
     a.updatedAt = Date.now();
     saveState();
-    renderAccountManageList();
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    // 换分类会改变"哪些账户算投资"，收益页必须跟着重算
+    refreshOpenSurfaces();
     showToast(`「${a.name}」已归到${group}`, 'success');
 }
 
@@ -6537,9 +6665,7 @@ function changeAccountType(id, kind) {
     if (!groupsForKind(kind).includes(a.group)) a.group = groupsForKind(kind)[0];
     a.updatedAt = Date.now();
     saveState();
-    renderAccountManageList();
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    refreshOpenSurfaces();
     showToast(`「${a.name}」已改为${kind === 'asset' ? '资产' : '负债'}账户`, 'success');
 }
 
@@ -8160,6 +8286,9 @@ function openReturnDetailForPeriod(months, label) {
     if (s) s.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
+    // 这是"多个账户的期间汇总"，没有单一账户可编辑
+    const editBtn = document.getElementById('acctHistEdit');
+    if (editBtn) editBtn.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
     const portCum = portfolioCumulative(months);
     if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
@@ -8209,6 +8338,8 @@ function openReturnHistoryForAccount(accountId, label) {
     if (s) s.textContent = '收益历史';
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
+    const editBtn = document.getElementById('acctHistEdit');
+    if (editBtn) { editBtn.style.display = 'flex'; editBtn.onclick = () => openAccountEdit(accountId); }
     renderReturnAccountHistory();
     const modal = document.getElementById('accountHistoryModal');
     if (modal) { modal.classList.remove('hidden'); raiseOverlay('accountHistoryModal'); }
@@ -8238,6 +8369,7 @@ function renderReturnAccountHistory() {
         <div class="bal-history-row">
             <span class="bh-month">${r.month.replace('-', '年')}月${state.balanceOwner === 'all' ? `<span class="bh-member">${_esc(r.member || '')}</span>` : ''}</span>
             <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
+            <button class="bh-edit" onclick="editReturnRecord('${r.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
             <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
         </div>`;
     }).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
@@ -8512,6 +8644,7 @@ function initEventListeners() {
 
     // Balance sheet view
     initBalanceListeners();
+    initAccountEditModal();
 
     // 四笔钱
     initFundListeners();

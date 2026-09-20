@@ -740,7 +740,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.33.7</div>
+                                    <div class="about-version">版本 1.33.8</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1053,6 +1053,45 @@
             </div>
         </div>
 
+        <!-- Account Edit Modal -->
+        <div class="modal-overlay hidden" id="accountEditModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>编辑账户</h2>
+                        <div class="cat-txn-sub" id="acctEditSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeAccountEdit()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <label class="settings-label">名称</label>
+                    <input type="text" class="text-input" id="acctEditName" placeholder="账户名称">
+                    <div class="acct-edit-pair">
+                        <div>
+                            <label class="settings-label">类型</label>
+                            <select class="text-input" id="acctEditKind">
+                                <option value="asset">资产</option>
+                                <option value="liability">负债</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="settings-label">分类</label>
+                            <select class="text-input" id="acctEditGroup"></select>
+                        </div>
+                    </div>
+                    <div class="settings-sublabel">分类决定它算不算进收益率（稳健理财 / 长期投资才算），负债改资产会一并影响净资产口径。</div>
+                    <label class="settings-label">图标</label>
+                    <div class="icon-picker" id="acctEditIcons"></div>
+                    <label class="settings-label">颜色</label>
+                    <div class="color-picker" id="acctEditColors"></div>
+                    <div class="acct-edit-actions">
+                        <button class="secondary-btn" onclick="closeAccountEdit()">取消</button>
+                        <button class="primary-btn" onclick="saveAccountEdit()"><i class="fa-solid fa-check"></i> 保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Account History Modal -->
         <div class="modal-overlay hidden" id="guardModal">
             <div class="modal balance-modal guard-modal">
@@ -1081,6 +1120,7 @@
                         </div>
                     </div>
                     <div style="display:flex;gap:6px;align-items:center;">
+                        <button class="modal-icon-btn" id="acctHistEdit" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
                         <button class="modal-icon-btn" id="acctHistDelete" title="删除账户"><i class="fa-solid fa-trash"></i></button>
                         <button class="modal-close" onclick="closeAccountHistoryModal()"><i class="fa-solid fa-xmark"></i></button>
                     </div>
@@ -1202,7 +1242,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.33.7').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.33.8').catch(() => {});
             });
         }
     </script>
