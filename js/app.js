@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.4';
+const APP_VERSION = '1.33.5';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6802,20 +6802,25 @@ function memberBarHTML() {
     return html;
 }
 
-function renderBalanceMemberBar() {
-    ['balMemberBar', 'retMemberBar'].forEach(id => {
-        const bar = document.getElementById(id);
-        if (!bar) return;
-        bar.innerHTML = memberBarHTML();
-        if (bar.$wired) return;                 // 监听挂在容器上，重渲染不需要重复加
-        bar.$wired = true;
-        bar.addEventListener('click', e => {
-            const chip = e.target.closest ? e.target.closest('.bm-chip') : null;
-            if (!chip) return;
-            if (chip.dataset.add) { addBalanceMember(); return; }
-            if (chip.dataset.owner !== undefined) setBalanceOwner(chip.dataset.owner);
-        });
+// 画 + 挂监听。监听挂在容器上（innerHTML 换掉子节点不会丢），$wired 保证只挂一次。
+// 以前监听是跟着 renderBalance() 顺带挂的，所以一开屏就停在投资收益页时
+// 点「本人 / 家人」完全没反应 —— 得先去别的页面绕一圈把资产负债画出来才行。
+function paintMemberBar(id) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.innerHTML = memberBarHTML();
+    if (bar.$wired) return;
+    bar.$wired = true;
+    bar.addEventListener('click', e => {
+        const chip = e.target.closest ? e.target.closest('.bm-chip') : null;
+        if (!chip) return;
+        if (chip.dataset.add) { addBalanceMember(); return; }
+        if (chip.dataset.owner !== undefined) setBalanceOwner(chip.dataset.owner);
     });
+}
+
+function renderBalanceMemberBar() {
+    ['balMemberBar', 'retMemberBar'].forEach(paintMemberBar);
 }
 
 function renderFamilyBars() {
@@ -7184,8 +7189,7 @@ function renderReturnSelectors() {
 }
 
 function renderReturnMemberBar() {
-    const bar = document.getElementById('retMemberBar');
-    if (bar) bar.innerHTML = memberBarHTML();
+    paintMemberBar('retMemberBar');
 }
 
 function setReturnChartType(t) {
@@ -7447,7 +7451,7 @@ function renderReturnSummary(info) {
     else monthHint = `平均本金 ${formatCurrency(mStat.base)} · 未录入金（近似）`;
     const monthCard = {
         label: mKey ? `${ymd(mKey)} 收益` : '本月收益',
-        amount: mKey ? sumOf([mKey]) : 0, rate: mStat.rate, rateLabel: '本月收益率',
+        amount: mKey ? sumOf([mKey]) : 0, rate: mStat.rate,
         amountId: 'retMonthAmount', rateId: 'retMonthRate', hintId: 'retMonthHint', hint: monthHint,
     };
 
@@ -7456,7 +7460,7 @@ function renderReturnSummary(info) {
     const pStat = prevM ? portfolioMonthStats(prevM) : null;
     const prevMonthCard = {
         label: prevM ? `${ymd(prevM)} 收益` : '上月收益',
-        amount: prevM ? sumOf([prevM]) : null, rate: pStat ? pStat.rate : null, rateLabel: '上月收益率',
+        amount: prevM ? sumOf([prevM]) : null, rate: pStat ? pStat.rate : null,
         amountId: 'retPrevAmount', rateId: 'retPrevRate', hintId: 'retPrevHint',
         hint: prevM ? `环比 ${diffText(mKey, prevM)}` : '没有上一期数据',
     };
@@ -7465,7 +7469,6 @@ function renderReturnSummary(info) {
     const prevYearCard = {
         label: `${viewYear - 1} 年收益`,
         amount: pyMonths.length ? sumOf(pyMonths) : null, rate: pyMonths.length ? pyCum.cumulative : null,
-        rateLabel: `${viewYear - 1} 年收益率`,
         amountId: 'retPrevAmount', rateId: 'retPrevRate', hintId: 'retPrevHint',
         hint: pyMonths.length ? `${pyMonths.length} 个月有记录` : `${viewYear - 1} 年没有记录`,
     };
@@ -7474,7 +7477,7 @@ function renderReturnSummary(info) {
     const yCum = portfolioCumulative(yMonths);
     const yearCard = {
         label: `${viewYear} 年收益`,
-        amount: sumOf(yMonths), rate: yCum.cumulative, rateLabel: `${viewYear} 年收益率`,
+        amount: sumOf(yMonths), rate: yCum.cumulative,
         amountId: 'retYearAmount', rateId: 'retYearRate', hintId: 'retYearHint',
         hint: yCum.months ? `${yCum.months} 个月连乘${viewYear === nowYear ? '（至今）' : ''}`
             : (yMonths.length ? '这些月份本金未知，算不出率' : '这一年没有记录'),
@@ -7485,7 +7488,7 @@ function renderReturnSummary(info) {
     const avgCard = {
         label: info.period === 'year' ? `${viewYear} 年月均` : '月均收益',
         amount: avgList.length ? Math.round(sumOf(avgList) / avgList.length * 100) / 100 : 0,
-        rate: avgRateOf(avgList), rateLabel: '月均收益率',
+        rate: avgRateOf(avgList),
         amountId: 'retAvgAmount', rateId: 'retAvgRate', hintId: 'retAvgHint',
         hint: avgList.length ? `按 ${avgList.length} 个月平均${avgCum.months < avgList.length ? `（${avgCum.months} 个月能算出率）` : ''}`
             : '还没有收益记录',
@@ -7494,7 +7497,6 @@ function renderReturnSummary(info) {
     const cumAll = portfolioCumulative(monthsAll);
     const totalCard = {
         label: '累计收益', amount: sumOf(monthsAll), rate: cumAll.cumulative,
-        rateLabel: '累计收益率', rateNote: '时间加权',
         amountId: 'retTotalAmount', rateId: 'retTotalRate', hintId: 'retMonthsHint',
         hint: monthsAll.length ? `共 ${monthsAll.length} 个月有记录` : '还没有收益记录',
     };
@@ -7503,14 +7505,14 @@ function renderReturnSummary(info) {
         : info.period === 'all' ? [avgCard, monthCard, yearCard, totalCard]
             : [monthCard, prevMonthCard, yearCard, totalCard];
 
+    // 卡上不再写"XX收益率"：百分数跟在金额后面一眼就懂，省下来的一行留给小字说明
     box.innerHTML = slots.map(c => {
         const amtCls = c.amount === null ? '' : (c.amount > 0 ? ' income' : (c.amount < 0 ? ' expense' : ''));
         const rateCls = c.rate === null ? '' : (c.rate > 0 ? ' income' : (c.rate < 0 ? ' expense' : ''));
         return `<div class="report-card ret-sum-card">
             <div class="report-card-top"><span class="report-label">${_esc(c.label)}</span></div>
-            <span class="report-value${amtCls}" id="${c.amountId}">${c.amount === null || c.amount === undefined ? '—' : _esc(formatCurrency(c.amount))}</span>
-            <div class="ret-card-rate">
-                <span class="rcr-k">${_esc(c.rateLabel)}${c.rateNote ? `<span class="rcr-note">${_esc(c.rateNote)}</span>` : ''}</span>
+            <div class="ret-card-line">
+                <span class="report-value${amtCls}" id="${c.amountId}">${c.amount === null || c.amount === undefined ? '—' : _esc(formatCurrency(c.amount))}</span>
                 <b class="rcr-v${rateCls}" id="${c.rateId}">${pctText(c.rate)}</b>
             </div>
             <div class="bal-asof" id="${c.hintId}">${_esc(c.hint || '')}</div>

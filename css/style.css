@@ -3765,15 +3765,7 @@ table.bill-stats {
 /* ---- 投资收益顶部：一张卡里"金额 + 同一区间的收益率" ---- */
 .ret-sum { margin-bottom: 10px; }
 .ret-sum-card { gap: 4px; }
-.ret-card-rate {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 2px;
-}
-.rcr-k { font-size: 11.5px; color: var(--text-tertiary); }
-.rcr-note { margin-left: 4px; font-size: 10px; color: var(--text-quaternary, var(--text-tertiary)); opacity: .8; }
+.ret-card-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .rcr-v { font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
 .ret-sum-card .bal-asof { line-height: 1.45; }
 
@@ -3816,7 +3808,7 @@ table.bill-stats {
     line-height: 1.6;
 }
 @media (max-width: 640px) {
-    .ret-card-rate { flex-direction: column; align-items: flex-start; gap: 0; }
+    .ret-card-line { gap: 8px; }
     .rcr-v { font-size: 14px; }
     .rsl-actions { width: 100%; justify-content: flex-start; gap: 10px; }
 }
