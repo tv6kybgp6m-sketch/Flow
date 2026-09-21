@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.8';
+const APP_VERSION = '1.33.9';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -382,6 +382,16 @@ function undoLastDelete() {
                     if (!state[mv.coll].some(x => x.id === r.id)) state[mv.coll].push(Object.assign({}, r));
                 });
             });
+        } else if (coll === 'insuranceMembers') {
+            items.forEach(name => {
+                if (!state.insuranceMembers.includes(name)) {
+                    state.insuranceMembers.push(name);
+                    state.insuranceMemberAddedAt[name] = Date.now();
+                }
+                if (Array.isArray(state.deleted.insuranceMembers)) {
+                    state.deleted.insuranceMembers = state.deleted.insuranceMembers.filter(t => t.id !== name);
+                }
+            });
         } else if (coll === 'members') {
             // 成员名单是字符串数组，且要连"添加时间"一起复活，否则会被自己的墓碑吃掉
             items.forEach(name => {
@@ -418,6 +428,7 @@ function undoLastDelete() {
     saveState();
     refreshOpenSurfaces();
     if (op.rows.members) renderAccountManageList();
+    if (op.rows.insuranceMembers || op.rows.insurancePolicies) renderFourFunds();
     showToast('已撤销：' + op.label, 'success');
     return true;
 }
@@ -6952,23 +6963,25 @@ function renameInsuranceMember(old) {
     renderFourFunds();
 }
 
+// 保险成员直接删：保单是"这个人的这份保障"，把人并到别人名下等于凭空造出一份不属于他的保障，
+// 所以不并入、直接连人带保单一起删，删完给 8 秒撤销。
 function deleteInsuranceMember(name) {
     if (state.insuranceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
-    const fallback = state.insuranceMembers.find(m => m !== name);
-    const mine = state.insurancePolicies.filter(p => p.member === name).length;
-    if (!confirm(`删除保险成员「${name}」？${mine ? `TA 的 ${mine} 份保单会并入「${fallback}」。` : ''}`)) return;
-    state.insurancePolicies.forEach(p => {
-        if (p.member !== name) return;
-        p.member = fallback;
-        p.id = `${p.type}__${fallback}`;
-        p.updatedAt = Date.now();
-    });
+    const mine = state.insurancePolicies.filter(p => p.member === name);
+    if (!confirm(`删除保险成员「${name}」？${mine.length ? `TA 名下的 ${mine.length} 份保单会一起删掉（8 秒内可撤销）。` : 'TA 名下没有保单。'}`)) return;
+    mine.forEach(pc => addTombstone('insurance', pc.id));
+    state.insurancePolicies = state.insurancePolicies.filter(pc => pc.member !== name);
     state.insuranceMembers = state.insuranceMembers.filter(m => m !== name);
     addTombstone('insuranceMembers', name);
     delete state.insuranceMemberAddedAt[name];
-    if (fundEditMember === name) fundEditMember = fallback;
+    const next = state.insuranceMembers[0] || '本人';
+    if (fundEditMember === name) fundEditMember = next;
+    const canUndo = pushUndo(`保险成员「${name}」`, { insuranceMembers: [name], insurancePolicies: mine });
     saveState();
+    refreshOpenSurfaces();
     renderFourFunds();
+    if (canUndo) showUndoToast(`保险成员「${name}」`);
+    else showToast('成员已删除', 'success');
 }
 
 function addInsMember() {
@@ -7748,22 +7761,20 @@ function renderReturnSummary(info) {
         amountId: 'retMonthAmount', rateId: 'retMonthRate', hintId: 'retMonthHint', hint: monthHint,
     };
 
-    // 上一期：月报看上月，年报看去年
-    const prevM = mKey ? previousMonthOf(mKey) : null;
-    const pStat = prevM ? portfolioMonthStats(prevM) : null;
-    const prevMonthCard = {
-        label: prevM ? `${ymd(prevM)} 收益` : '上月收益',
-        amount: prevM ? sumOf([prevM]) : null, rate: pStat ? pStat.rate : null,
-        amountId: 'retPrevAmount', rateId: 'retPrevRate', hintId: 'retPrevHint',
-        hint: prevM ? `环比 ${diffText(mKey, prevM)}` : '没有上一期数据',
-    };
-    const pyMonths = monthsOf(viewYear - 1);
-    const pyCum = portfolioCumulative(pyMonths);
-    const prevYearCard = {
-        label: `${viewYear - 1} 年收益`,
-        amount: pyMonths.length ? sumOf(pyMonths) : null, rate: pyMonths.length ? pyCum.cumulative : null,
-        amountId: 'retPrevAmount', rateId: 'retPrevRate', hintId: 'retPrevHint',
-        hint: pyMonths.length ? `${pyMonths.length} 个月有记录` : `${viewYear - 1} 年没有记录`,
+    // 第二张固定给"投资以来年化复合收益率"：它本来就是跨区间的指标，
+    // 不随月报/年报/总切换，所以放在哪个档位都是同一个数。
+    // （上月 / 上年的对比没丢 —— 下面的日历格和月度表里每个月都在。）
+    const cumAll = portfolioCumulative(monthsAll);
+    const annual = (cumAll.cumulative !== null && cumAll.months > 0 && 1 + cumAll.cumulative > 0)
+        ? Math.pow(1 + cumAll.cumulative, 12 / cumAll.months) - 1 : null;
+    const annualCard = {
+        label: '投资以来年化',
+        big: pctText(annual), bigCls: rateClsOf(annual),
+        sub: cumAll.cumulative === null ? '还算不出' : '累计 ' + pctText(cumAll.cumulative),
+        subCls: rateClsOf(cumAll.cumulative),
+        amountId: 'retAnnualAmount', rateId: 'retAnnualSub', hintId: 'retAnnualHint',
+        hint: cumAll.months >= 12 ? `按 ${cumAll.months} 个月复合折算`
+            : (cumAll.months ? `只有 ${cumAll.months} 个月样本，折算出来波动大，先看趋势` : '记录满一个月后才能折算'),
     };
 
     const yMonths = monthsOf(viewYear);
@@ -7787,36 +7798,37 @@ function renderReturnSummary(info) {
             : '还没有收益记录',
     };
 
-    const cumAll = portfolioCumulative(monthsAll);
     const totalCard = {
         label: '累计收益', amount: sumOf(monthsAll), rate: cumAll.cumulative,
         amountId: 'retTotalAmount', rateId: 'retTotalRate', hintId: 'retMonthsHint',
         hint: monthsAll.length ? `共 ${monthsAll.length} 个月有记录` : '还没有收益记录',
     };
 
-    const slots = info.period === 'year' ? [yearCard, prevYearCard, avgCard, totalCard]
-        : info.period === 'all' ? [avgCard, monthCard, yearCard, totalCard]
-            : [monthCard, prevMonthCard, yearCard, totalCard];
+    const slots = info.period === 'year' ? [yearCard, annualCard, avgCard, totalCard]
+        : info.period === 'all' ? [avgCard, annualCard, yearCard, totalCard]
+            : [monthCard, annualCard, yearCard, totalCard];
 
     // 卡上不再写"XX收益率"：百分数跟在金额后面一眼就懂，省下来的一行留给小字说明
     box.innerHTML = slots.map(c => {
-        const amtCls = c.amount === null ? '' : (c.amount > 0 ? ' income' : (c.amount < 0 ? ' expense' : ''));
-        const rateCls = c.rate === null ? '' : (c.rate > 0 ? ' income' : (c.rate < 0 ? ' expense' : ''));
+        const big = c.big !== undefined ? c.big
+            : (c.amount === null || c.amount === undefined ? '—' : formatCurrency(c.amount));
+        const bigCls = c.big !== undefined ? (c.bigCls || '') : rateClsOf(c.amount);
+        const small = c.sub !== undefined ? c.sub : pctText(c.rate);
+        const smallCls = c.sub !== undefined ? (c.subCls || '') : rateClsOf(c.rate);
         return `<div class="report-card ret-sum-card">
             <div class="report-card-top"><span class="report-label">${_esc(c.label)}</span></div>
             <div class="ret-card-line">
-                <span class="report-value${amtCls}" id="${c.amountId}">${c.amount === null || c.amount === undefined ? '—' : _esc(formatCurrency(c.amount))}</span>
-                <b class="rcr-v${rateCls}" id="${c.rateId}">${pctText(c.rate)}</b>
+                <span class="report-value${bigCls}" id="${c.amountId}">${_esc(big)}</span>
+                <b class="rcr-v${smallCls}" id="${c.rateId}">${_esc(small)}</b>
             </div>
             <div class="bal-asof" id="${c.hintId}">${_esc(c.hint || '')}</div>
         </div>`;
     }).join('');
 }
 
-// 环比那一小段文字（本月卡 vs 上月卡）
-function diffText(mKey, prevM) {
-    const d = returnSummary([mKey]).total - returnSummary([prevM]).total;
-    return `${d >= 0 ? '+' : ''}${formatCurrency(d)}`;
+// 涨/跌用 .income / .expense 表意，具体红绿由投资收益页的配色规则决定
+function rateClsOf(v) {
+    return (v === null || v === undefined) ? '' : (v > 0 ? ' income' : (v < 0 ? ' expense' : ''));
 }
 
 // ---- 口径：卡片行下面的一行小字，默认只露账户名单，「详情」里放排除项和开关 ----
