@@ -41,11 +41,11 @@
                 <nav class="nav-menu">
                     <a class="nav-item active" data-view="transactions">
                         <i class="fa-solid fa-list-ul"></i>
-                        <span>交易记录</span>
+                        <span>交易记录</span><span class="nav-dot hidden" id="navDotTransactions" title="有周期账待确认"></span>
                     </a>
                     <a class="nav-item" data-view="reports">
                         <i class="fa-solid fa-chart-pie"></i>
-                        <span>报表分析</span>
+                        <span>报表分析</span><span class="nav-dot hidden" id="navDotReports" title="有月份还没结账"></span>
                     </a>
                     <a class="nav-item" data-view="balance">
                         <i class="fa-solid fa-scale-balanced"></i>
@@ -53,7 +53,7 @@
                     </a>
                     <a class="nav-item" data-view="funds">
                         <i class="fa-solid fa-chart-pie"></i>
-                        <span>四笔钱</span>
+                        <span>四笔钱</span><span class="nav-dot hidden" id="navDotFunds" title="有保单临近缴费/到期"></span>
                     </a>
                     <a class="nav-item" data-view="returns">
                         <i class="fa-solid fa-arrow-trend-up"></i>
@@ -104,6 +104,12 @@
                             </button>
                         </div>
                     </div>
+                    <div class="recur-banner hidden" id="recurQueueBanner">
+                        <i class="fa-solid fa-rotate"></i>
+                        <span class="rb-text"><b id="recurQueueCount">0 笔周期账待确认</b>
+                            <span class="rb-hint" id="recurQueueHint"></span></span>
+                        <button class="link-btn" onclick="openRecurQueue()">去确认</button>
+                    </div>
                     <div class="filter-bar">
                         <div class="filter-tabs">
                             <button class="filter-tab active" data-filter="all">全部</button>
@@ -150,7 +156,7 @@
                             <div class="report-period">
                                 <button class="period-btn active" data-period="month">月报</button>
                                 <button class="period-btn" data-period="year">年报</button>
-                                <button class="period-btn" data-period="all">总</button>
+                                <button class="period-btn" data-period="all">全部</button>
                             </div>
                             <div class="report-period-picker" id="reportYearWrap">
                                 <select class="filter-select" id="reportYearSelect"></select>
@@ -160,6 +166,18 @@
                             </div>
                         </div>
                     </div>
+                    <!-- 月度结账清单：把每月重复的那几步集中成待办（原来藏在资产负债页最底下） -->
+                    <div class="close-card hidden" id="closeCard">
+                        <div class="close-head">
+                            <div class="close-head-text">
+                                <h3>月度结账 <select class="filter-select close-month" id="closeMonthSelect"></select></h3>
+                                <div class="close-sub" id="closeProgress"></div>
+                            </div>
+                            <button class="secondary-btn" onclick="renderCloseCard()"><i class="fa-solid fa-rotate"></i> 重新检查</button>
+                        </div>
+                        <div id="closeList"></div>
+                    </div>
+
                     <div class="report-summary">
                         <div class="report-card clickable" data-metric="income">
                             <div class="report-card-top">
@@ -272,6 +290,7 @@
                             </div>
                         </div>
                         <div class="ins-members" id="insMembers"></div>
+                        <div class="recur-banner ins-renew-banner hidden" id="insRenewBanner"></div>
                         <div class="ins-list" id="insList"></div>
                     </div>
                 </section>
@@ -284,7 +303,7 @@
                             <div class="report-period">
                                 <button class="period-btn active" data-bal-period="month">月报</button>
                                 <button class="period-btn" data-bal-period="year">年报</button>
-                                <button class="period-btn" data-bal-period="all">总</button>
+                                <button class="period-btn" data-bal-period="all">全部</button>
                             </div>
                             <div class="report-period-picker" id="balanceYearWrap">
                                 <select class="filter-select" id="balanceYearSelect"></select>
@@ -330,18 +349,6 @@
                             <span class="report-value" id="balRatio">0.0%</span>
                             <div class="bal-asof" id="balAsOf"></div>
                         </div>
-                    </div>
-
-                    <!-- 本月结账清单：把每月重复的那几步集中成待办 -->
-                    <div class="close-card hidden" id="closeCard">
-                        <div class="close-head">
-                            <div class="close-head-text">
-                                <h3>本月结账 <span id="closeMonthLabel"></span></h3>
-                                <div class="close-sub" id="closeProgress"></div>
-                            </div>
-                            <button class="secondary-btn" onclick="renderBalanceCloseCard()"><i class="fa-solid fa-rotate"></i> 重新检查</button>
-                        </div>
-                        <div id="closeList"></div>
                     </div>
 
                     <!-- 净资产变动桥：这个月的钱从哪儿来、到哪儿去 -->
@@ -433,7 +440,7 @@
                             <div class="report-period">
                                 <button class="period-btn active" data-ret-period="month">月报</button>
                                 <button class="period-btn" data-ret-period="year">年报</button>
-                                <button class="period-btn" data-ret-period="all">总</button>
+                                <button class="period-btn" data-ret-period="all">全部</button>
                             </div>
                             <div class="report-period-picker" id="returnYearWrap">
                                 <select class="filter-select" id="returnYearSelect"></select>
@@ -443,6 +450,9 @@
                             </div>
                             <button class="secondary-btn" onclick="openAccountsModal()">
                                 <i class="fa-solid fa-building-columns"></i> 账户
+                            </button>
+                            <button class="secondary-btn" onclick="openReturnScope()">
+                                <i class="fa-solid fa-filter"></i> 口径
                             </button>
                             <button class="primary-btn" onclick="openReturnModal()">
                                 <i class="fa-solid fa-plus"></i> 记收益
@@ -740,7 +750,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.33.9</div>
+                                    <div class="about-version">版本 1.34.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1053,6 +1063,68 @@
             </div>
         </div>
 
+        <!-- Insurance Claim Modal -->
+        <div class="modal-overlay hidden" id="insClaimModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2 id="insClaimTitle">理赔记录</h2>
+                        <div class="cat-txn-sub" id="insClaimSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeInsClaims()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div id="insClaimList"></div>
+                    <div class="claim-form">
+                        <input type="date" class="text-input" id="claimDate">
+                        <input type="number" step="0.01" class="text-input" id="claimAmount" placeholder="理赔金额">
+                        <input type="text" class="text-input" id="claimNote" placeholder="备注（可选）">
+                        <button class="secondary-btn" type="button" id="claimAddBtn"><i class="fa-solid fa-plus"></i> 记一笔</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recurring Queue Modal -->
+        <div class="modal-overlay hidden" id="recurQueueModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>周期账待确认</h2>
+                        <div class="cat-txn-sub" id="recurQueueModalSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeRecurQueue()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div id="recurQueueList"></div>
+                    <div class="scope-foot">
+                        <button class="secondary-btn" type="button" id="recurQueueAllBtn" data-rq-all="1">全部入账</button>
+                        <button class="primary-btn" onclick="closeRecurQueue()">完成</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Return Scope Modal -->
+        <div class="modal-overlay hidden" id="scopeModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>收益率算哪些账户</h2>
+                        <div class="cat-txn-sub" id="scopeModalSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeReturnScope()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div id="scopeModalBody"></div>
+                    <div class="scope-foot">
+                        <button class="secondary-btn" id="scopeAutoBtn">恢复自动归类</button>
+                        <button class="primary-btn" onclick="closeReturnScope()">完成</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Account Edit Modal -->
         <div class="modal-overlay hidden" id="accountEditModal">
             <div class="modal balance-modal">
@@ -1242,7 +1314,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.33.9').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.34.0').catch(() => {});
             });
         }
     </script>

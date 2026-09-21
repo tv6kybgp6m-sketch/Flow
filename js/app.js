@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.33.9';
+const APP_VERSION = '1.34.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -161,6 +161,8 @@ let state = {
     balances: [],
     returns: [],               // 投资收益：{id, member, accountId, month, amount}
     recurring: [],               // 周期记账规则：{id, type, amount, categoryId, paymentMethod, note, member, dayOfMonth, startDate, untilDate, lastRunPeriod, active}
+    pendingRecurring: [],        // 到点生成、但还没入账的周期账（本机待办队列，不参与同步）
+    recurringSkipped: {},        // 'ruleId|日期' -> true：手动跳过的期次，不再重复生成
     returnPeriod: 'month',
     returnYear: null,
     returnMonth: null,
@@ -172,6 +174,7 @@ let state = {
     returnCalYear: null,         // 月收益视图看哪一年；null = 跟随页面年份
     returnGran: null,
     returnScopeOpen: false,      // 口径那行小字：详情是否展开
+    closeMonth: null,            // 月度结账清单盯哪个月；null = 最近一个已过完的月
     balancePeriod: 'month',
     balanceYear: null,
     balanceMonth: null,
@@ -372,7 +375,38 @@ function undoLastDelete() {
     Object.keys(op.rows).forEach(coll => {
         const items = op.rows[coll] || [];
         const bucket = UNDO_BUCKET[coll];
-        if (coll === 'memberMove') {
+        if (coll === 'claimAdd' || coll === 'claimDel') {
+            items.forEach(one => {
+                const p = state.insurancePolicies.find(x => x.id === one.policyId);
+                if (!p) return;
+                if (!Array.isArray(p.claims)) p.claims = [];
+                if (coll === 'claimAdd') p.claims = p.claims.filter(c => c.id !== one.claimId);
+                else if (one.claim && !p.claims.some(c => c.id === one.claim.id)) p.claims.push(Object.assign({}, one.claim));
+                p.updatedAt = Date.now();
+            });
+        } else if (coll === 'recurConfirm') {
+            // 把生成的交易收回去（写墓碑，别让另一台设备再把它带回来）、待确认项复原
+            items.forEach(one => {
+                (one.txns || []).forEach(id => {
+                    if (state.transactions.some(t => t.id === id)) {
+                        state.transactions = state.transactions.filter(t => t.id !== id);
+                        addTombstone('transactions', id);
+                    }
+                });
+                (one.pending || []).forEach(p => {
+                    if (!Array.isArray(state.pendingRecurring)) state.pendingRecurring = [];
+                    if (!state.pendingRecurring.some(x => x.id === p.id)) state.pendingRecurring.push(Object.assign({}, p));
+                });
+                (one.skips || []).forEach(k => { delete state.recurringSkipped[k]; });
+            });
+        } else if (coll === 'arraySnapshot') {
+            // 整段数组换回清理前的样子（顺序、被删掉的重复条目都原样回来）
+            items.forEach(snap => {
+                if (snap && Array.isArray(snap.rows) && Array.isArray(state[snap.snapColl])) {
+                    state[snap.snapColl] = snap.rows.slice();
+                }
+            });
+        } else if (coll === 'memberMove') {
             // 先按"并入后"的 id 删掉，再把原来的行塞回去（撞车被吃掉的那条也能复活）
             items.forEach(mv => {
                 if (!Array.isArray(state[mv.coll])) return;
@@ -522,11 +556,15 @@ function recurringOccurrences(rule, today) {
     return out;
 }
 
-// 补记所有到期的规则；返回新建的交易
+// 到期的规则先进「待确认」队列，不直接变成交易：
+// 人不在的时候让机器替自己记一笔，事后要么没发现、要么发现也删不干净。
+// 返回新生成的待确认条目。
 function runRecurringRules(silent) {
     if (!Array.isArray(state.recurring)) state.recurring = [];
+    if (!Array.isArray(state.pendingRecurring)) state.pendingRecurring = [];
+    if (!state.recurringSkipped || typeof state.recurringSkipped !== 'object') state.recurringSkipped = {};
     const today = new Date(); today.setHours(23, 59, 59, 999);
-    const existing = new Set(state.transactions.map(t => t.id));
+    const existing = new Set(state.transactions.map(t => t.id).concat(state.pendingRecurring.map(p => p.id)));
     const created = [];
     state.recurring.forEach(rule => {
         if (!rule || !rule.active) return;
@@ -535,8 +573,9 @@ function runRecurringRules(silent) {
             const dateStr = ymdStr(dt);
             const id = `rec_${rule.id}_${dateStr}`;
             if (existing.has(id)) return;
-            const txn = {
-                id,
+            if (state.recurringSkipped[`${rule.id}|${dateStr}`]) return;      // 这期被手动跳过过
+            const item = {
+                id, ruleId: rule.id,
                 type: rule.type === 'income' ? 'income' : 'expense',
                 amount: Number(rule.amount) || 0,
                 categoryId: rule.categoryId,
@@ -544,21 +583,157 @@ function runRecurringRules(silent) {
                 time: rule.time || '',
                 note: rule.note || '',
                 paymentMethod: rule.paymentMethod || '现金',
-                recurringRuleId: rule.id,
                 createdAt: Date.now(), updatedAt: Date.now(),
             };
-            state.transactions.push(txn);
+            state.pendingRecurring.push(item);
             existing.add(id);
-            created.push(txn);
+            created.push(item);
         });
     });
     if (created.length) {
         flushState();
         renderView(state.currentView);
+        renderPendingRecurring();
         updateSidebarSummary();
-        if (!silent) showToast(`周期记账已补记 ${created.length} 笔`, 'success');
+        if (!silent) showToast(`周期记账有 ${created.length} 笔待确认`, 'info');
     }
     return created;
+}
+
+// ---- 待确认队列：入账 / 跳过 / 全部入账 ----
+function pendingRecurringSorted() {
+    return (state.pendingRecurring || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function confirmPendingRecurring(id, amount) {
+    if (!Array.isArray(state.pendingRecurring)) return false;
+    const idx = state.pendingRecurring.findIndex(p => p.id === id);
+    if (idx < 0) return false;
+    const p = state.pendingRecurring[idx];
+    const amt = (amount === undefined || amount === null || amount === '')
+        ? (Number(p.amount) || 0) : (Number(amount) || 0);
+    state.pendingRecurring.splice(idx, 1);
+    let created = null;
+    if (!state.transactions.some(t => t.id === p.id)) {
+        created = {
+            id: p.id, type: p.type, amount: amt, categoryId: p.categoryId, date: p.date,
+            time: p.time || '', note: p.note || '', paymentMethod: p.paymentMethod || '现金',
+            recurringRuleId: p.ruleId, createdAt: Date.now(), updatedAt: Date.now(),
+        };
+        state.transactions.push(created);
+    }
+    const label = created ? `${p.date} 的周期账` : '该期（账本里已有同一条，只移出待办）';
+    const canUndo = pushUndo(label, { recurConfirm: [{ txns: created ? [created.id] : [], pending: [p], skips: [] }] });
+    saveState();
+    refreshOpenSurfaces();
+    renderPendingRecurring();
+    if (canUndo) showUndoToast(label);
+    else showToast('已入账', 'success');
+    return true;
+}
+
+function skipPendingRecurring(id) {
+    if (!Array.isArray(state.pendingRecurring)) return false;
+    const idx = state.pendingRecurring.findIndex(p => p.id === id);
+    if (idx < 0) return false;
+    const p = state.pendingRecurring[idx];
+    state.pendingRecurring.splice(idx, 1);
+    const key = `${p.ruleId}|${p.date}`;
+    state.recurringSkipped[key] = true;
+    const label = `跳过 ${p.date} 的周期账`;
+    const canUndo = pushUndo(label, { recurConfirm: [{ txns: [], pending: [p], skips: [key] }] });
+    saveState();
+    renderPendingRecurring();
+    refreshOpenSurfaces();
+    if (canUndo) showUndoToast(label);
+    return true;
+}
+
+function confirmAllPendingRecurring() {
+    const ids = pendingRecurringSorted().map(p => p.id);
+    if (!ids.length) { showToast('没有待确认的周期账', 'info'); return; }
+    ids.forEach(id => confirmPendingRecurring(id));
+}
+
+function renderPendingRecurring() {
+    const banner = document.getElementById('recurQueueBanner');
+    const list = pendingRecurringSorted();
+    if (banner) {
+        banner.classList.toggle('hidden', list.length === 0);
+        if (list.length) {
+            document.getElementById('recurQueueCount').textContent = `${list.length} 笔周期账待确认`;
+            document.getElementById('recurQueueHint').textContent =
+                `最早 ${list[0].date} · 确认后才会进交易记录`;
+        }
+    }
+    const dot = document.getElementById('navDotTransactions');
+    if (dot) {
+        dot.classList.toggle('hidden', list.length === 0);
+        dot.title = list.length ? `${list.length} 笔周期账待确认` : '';
+    }
+    const body = document.getElementById('recurQueueList');
+    if (body && !document.getElementById('recurQueueModal').classList.contains('hidden')) {
+        const sub = document.getElementById('recurQueueModalSub');
+        if (sub) sub.textContent = list.length
+            ? `${list.length} 笔待确认 · 金额可以直接改，确认后才会进交易记录；跳过表示这期不记`
+            : '都处理完了';
+        const allBtn = document.getElementById('recurQueueAllBtn');
+        if (allBtn) { allBtn.disabled = !list.length; allBtn.textContent = list.length ? `全部入账（${list.length}）` : '全部入账'; }
+        const cats = state.categories || [];
+        body.innerHTML = list.length ? list.map(p => {
+            const cat = cats.find(c => c.id === p.categoryId);
+            return `<div class="rq-row" data-rq="${p.id}">
+                <div class="rq-main">
+                    <div class="rq-name">${p.type === 'income' ? '收入' : '支出'} · ${_esc(cat ? cat.name : '分类已删除')}</div>
+                    <div class="rq-meta">${_esc(p.date)}${p.note ? ' · ' + _esc(p.note) : ''} · ${_esc(p.paymentMethod || '现金')}</div>
+                </div>
+                <div class="be-input rq-amt"><span class="currency-symbol">${state.settings.currency}</span>
+                    <input type="number" step="0.01" class="text-input be-field" data-rq-amount="${p.id}" value="${Number(p.amount) || 0}"></div>
+                <button class="link-btn" data-rq-ok="${p.id}">入账</button>
+                <button class="link-btn rq-skip" data-rq-skip="${p.id}">跳过</button>
+            </div>`;
+        }).join('') : '<div class="breakdown-empty">没有待确认的周期账，都处理完了</div>';
+    }
+}
+
+function openRecurQueue() {
+    const modal = document.getElementById('recurQueueModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');       // 先显形再画：renderPendingRecurring 只在弹窗可见时填列表
+    raiseOverlay(modal);
+    renderPendingRecurring();
+}
+
+function closeRecurQueue() {
+    const modal = document.getElementById('recurQueueModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function initInsClaimModal() {
+    const modal = document.getElementById('insClaimModal');
+    if (!modal || modal.$wired) return;
+    modal.$wired = true;
+    const add = document.getElementById('claimAddBtn');
+    if (add) add.addEventListener('click', addInsClaim);
+    modal.addEventListener('click', e => {
+        const t = e.target.closest ? e.target.closest('[data-claim-del]') : null;
+        if (t) removeInsClaim(t.dataset.claimDel);
+    });
+}
+
+function initRecurQueueModal() {
+    const modal = document.getElementById('recurQueueModal');
+    if (!modal || modal.$wired) return;
+    modal.$wired = true;
+    modal.addEventListener('click', e => {
+        const t = e.target.closest ? e.target.closest('[data-rq-ok],[data-rq-skip],[data-rq-all]') : null;
+        if (!t) return;
+        if (t.dataset.rqAll !== undefined) { confirmAllPendingRecurring(); return; }
+        const id = t.dataset.rqOk || t.dataset.rqSkip;
+        const amtEl = modal.querySelector(`[data-rq-amount="${id}"]`);
+        if (t.dataset.rqOk) confirmPendingRecurring(id, amtEl ? amtEl.value : undefined);
+        else skipPendingRecurring(id);
+    });
 }
 
 function nextDueText(rule) {
@@ -594,7 +769,7 @@ function renderRecurringSection() {
             <button class="icon-btn" data-recur-toggle="${rule.id}" title="${rule.active ? '暂停' : '启用'}">
                 <i class="fa-solid ${rule.active ? 'fa-pause' : 'fa-play'}"></i>
             </button>
-            <button class="icon-btn" data-recur-run="${rule.id}" title="立即补记一期"><i class="fa-solid fa-forward"></i></button>
+            <button class="icon-btn" data-recur-run="${rule.id}" title="立即生成一期（进待确认）"><i class="fa-solid fa-forward"></i></button>
             <button class="bh-delete" data-recur-del="${rule.id}" title="删除规则"><i class="fa-solid fa-trash"></i></button>
         </div>`;
     }).join('');
@@ -644,7 +819,7 @@ function renderRecurringSection() {
         saveState();
         renderRecurringSection();
         const made = runRecurringRules(true);
-        showToast(made.length ? `规则已添加，并补记了 ${made.length} 笔` : '规则已添加', 'success');
+        showToast(made.length ? `规则已添加，${made.length} 笔进了待确认` : '规则已添加', 'success');
     });
 
     box.onclick = e => {
@@ -661,8 +836,9 @@ function renderRecurringSection() {
             showToast('规则已删除', 'success');
         } else if (t.dataset.recurRun) {
             const made = runRecurringRules(false);
-            if (!made.length) showToast('这一期已经记过了', 'info');
+            if (!made.length) showToast('这一期已经记过或已跳过', 'info');
             renderRecurringSection();
+            renderPendingRecurring();
         }
     };
 }
@@ -1292,14 +1468,14 @@ function dataHealthCheck() {
         : `${names.slice(0, 6).join('、')} 等 ${names.length} 项`;
 
     const findings = [];
-    const add = (level, text, detail) => findings.push({ level, text, detail: detail || '' });
+    const add = (level, text, detail, fix) => findings.push({ level, text, detail: detail || '', fix: fix || null });
 
     const orphanBal = state.balances.filter(b => !acctIds.has(b.accountId));
-    if (orphanBal.length) add('warn', `${orphanBal.length} 条余额指向已删除的账户`,
-        shorten(uniq(orphanBal.map(b => b.accountId))));
     const orphanRet = state.returns.filter(r => !acctIds.has(r.accountId));
+    if (orphanBal.length) add('warn', `${orphanBal.length} 条余额指向已删除的账户`,
+        shorten(uniq(orphanBal.map(b => b.accountId))), { label: '清理', kind: 'orphans' });
     if (orphanRet.length) add('warn', `${orphanRet.length} 条收益指向已删除的账户`,
-        shorten(uniq(orphanRet.map(r => r.accountId))));
+        shorten(uniq(orphanRet.map(r => r.accountId))), { label: '清理', kind: 'orphans' });
     const badCat = state.transactions.filter(t => t.categoryId && !catIds.has(t.categoryId));
     if (badCat.length) add('warn', `${badCat.length} 笔交易的分类已不存在`, shorten(uniq(badCat.map(t => t.categoryId))));
     const future = state.transactions.filter(t => t.date && t.date > todayKey);
@@ -1311,8 +1487,8 @@ function dataHealthCheck() {
         dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies));
     // 预算是按 categoryId 存的，同一个分类出现两条就是脏数据
     const dupBud = dupIds((state.budgets || []).map(b => ({ id: b.categoryId })));
-    if (dupBud.length) add('warn', `${dupBud.length} 个分类有重复的预算条目`, shorten(dupBud));
-    if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)));
+    if (dupBud.length) add('warn', `${dupBud.length} 个分类有重复的预算条目`, shorten(dupBud), { label: '去重', kind: 'dups' });
+    if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)), { label: '去重', kind: 'dups' });
 
     // 账户平时在记、中间却断了几个月：这是最常见的漏记
     const gaps = [];
@@ -1383,6 +1559,7 @@ function renderDataHealth() {
     const s = h.stats;
     const warn = h.findings.filter(f => f.level === 'warn').length;
     const info = h.findings.filter(f => f.level === 'info').length;
+    const fixable = h.findings.filter(f => f.fix);
     const pct = s.limit > 0 ? Math.min(100, (s.bytes / s.limit) * 100) : 0;
     const exportTxt = s.lastExportAt ? relTimeText(s.lastExportAt) : '从未导出';
 
@@ -1405,15 +1582,88 @@ function renderDataHealth() {
         + `<div class="dh-grid">${grid.map(g => `
             <div class="dh-cell"><span class="dh-k">${_esc(g.k)}</span>
                 <span class="dh-v">${_esc(g.v)}</span>${g.n ? `<span class="dh-n">${_esc(g.n)}</span>` : ''}</div>`).join('')}</div>`
+        + (fixable.length ? `<div class="dh-fixbar">
+            <span>${fixable.length} 项可以一键处理，处理后会弹 8 秒撤销。</span>
+            <button class="secondary-btn" type="button" data-dhfix="all">一键全部处理</button></div>` : '')
         + (h.findings.length ? `<div class="dh-list">${h.findings.map(f => `
                 <div class="dh-item ${f.level}"><i class="fa-solid ${f.level === 'warn' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
-                    <span class="dh-text">${_esc(f.text)}${f.detail ? `<em>${_esc(f.detail)}</em>` : ''}</span></div>`).join('')}</div>` : '')
+                    <span class="dh-text">${_esc(f.text)}${f.detail ? `<em>${_esc(f.detail)}</em>` : ''}</span>
+                    ${f.fix ? `<button class="link-btn dh-fix" type="button" data-dhfix="${f.fix.kind}">${_esc(f.fix.label)}</button>` : ''}</div>`).join('')}</div>` : '')
         + `<div class="dh-where">
             <div><span>数据所在地址</span><code>${_esc(s.origin)}</code></div>
             <div><span>本机设备号</span><code>${_esc(s.deviceId)}</code></div>
             <div class="dh-tip">浏览器按地址隔离数据：换一个地址（哪怕同一份程序）就是一本全新的账，
                 换设备请用「备份为 JSON / 导入 JSON」搬数据。${s.gist ? '云同步已开启。' : ''}</div>
         </div>`;
+    box.querySelectorAll('[data-dhfix]').forEach(btn =>
+        btn.addEventListener('click', () => applyDataFix(btn.dataset.dhfix)));
+}
+
+// ---- 体检里"能修的那几项"真的去修 ----
+// 快照式撤销：去重是把同一 id 的多余几条删掉，通用撤销按 id 回填会把它们挡在门外
+// （因为"保留的那条"还占着这个 id），所以这里整段数组换进换出。
+function dhDedupe(coll) {
+    const seen = new Set(), keep = [];
+    let dropped = 0;
+    (state[coll] || []).slice()
+        // 倒序：让 updatedAt 最新的那条先被看到、被留下，丢掉的是旧的那条
+        .sort((a, b) => (Number(b && b.updatedAt) || 0) - (Number(a && a.updatedAt) || 0))
+        .forEach(row => {
+            const k = row && row.id;
+            if (k && seen.has(k)) { dropped++; return; }
+            if (k) seen.add(k);
+            keep.push(row);
+        });
+    return { keep, dropped };
+}
+
+function applyDataFix(kind) {
+    const acctIds = new Set(state.accounts.map(a => a.id));
+    const catIds = new Set(state.categories.map(c => c.id));
+    const snaps = [];
+    let removed = 0;
+    const take = (coll, next) => {
+        if (next === state[coll]) return;
+        // 同一个数组只留第一份快照 = 清理前的原样；
+        // 否则"先删孤儿、再去重"会存下两份，撤销时后一份把干净的那份盖掉。
+        if (!snaps.some(x => x.snapColl === coll)) snaps.push({ snapColl: coll, rows: state[coll].slice() });
+        state[coll] = next;
+    };
+    const doOrphans = () => {
+        const nb = state.balances.filter(b => acctIds.has(b.accountId));
+        const nr = state.returns.filter(r => acctIds.has(r.accountId));
+        removed += (state.balances.length - nb.length) + (state.returns.length - nr.length);
+        take('balances', nb);
+        take('returns', nr);
+    };
+    const doDups = () => {
+        ['transactions', 'balances', 'returns', 'categories', 'accounts', 'insurancePolicies'].forEach(coll => {
+            const r = dhDedupe(coll);
+            removed += r.dropped;
+            take(coll, r.keep);
+        });
+        const seenB = new Set();
+        const buds = (state.budgets || []).filter(b => {
+            if (b && b.categoryId && seenB.has(b.categoryId)) { removed++; return false; }
+            if (b && b.categoryId) seenB.add(b.categoryId);
+            return true;
+        });
+        take('budgets', buds);
+    };
+    if (kind === 'orphans') doOrphans();
+    else if (kind === 'dups') doDups();
+    else { doOrphans(); doDups(); }
+
+    if (!snaps.length) { showToast('没有需要处理的项目', 'info'); return; }
+    const touchedOrphan = kind !== 'dups';
+    const label = touchedOrphan && removed ? `孤儿记录和 ${removed} 条重复条目`
+        : (removed ? `${removed} 条重复记录` : '指向已删除账户的记录');
+    const canUndo = pushUndo(label, { arraySnapshot: snaps });
+    saveState();
+    refreshOpenSurfaces();
+    renderSettings();
+    if (canUndo) showUndoToast(label);
+    else showToast(`已清理${removed ? ` ${removed} 条` : ''}`, 'success');
 }
 
 // ---------------- 加密设置区 ----------------
@@ -2469,6 +2719,8 @@ function renderView(viewName) {
     }
     // Sidebar month summary always reflects current month regardless of active view
     updateSidebarSummary();
+    renderPendingRecurring();
+    updateInsBadges();
 }
 
 // ---- Sidebar summary (desktop sidebar month card) ----
@@ -3327,6 +3579,7 @@ const METRIC_META = {
 
 function renderReports() {
     renderReportSelectors();
+    renderCloseCard();
 
     const { range, txns } = getReportFiltered();
     const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
@@ -5408,7 +5661,7 @@ function renderBalance() {
     renderBalanceMemberBar();
     renderFamilySummary();
     renderNetBridge();
-    renderBalanceCloseCard();
+    updateNavBadges();
 }
 
 // ==================== 净资产变动桥 ====================
@@ -5626,19 +5879,39 @@ function closeChecklist(month) {
     return { items, bridge: b, month };
 }
 
-function renderBalanceCloseCard() {
+// 结账清单默认盯"最近一个已经过完的月"：当月还没过完，催结账没意义。
+function closeCheckMonth() {
+    const months = balanceMonths();
+    if (!months.length) return null;
+    if (state.closeMonth && months.indexOf(state.closeMonth) >= 0) return state.closeMonth;
+    const now = new Date();
+    const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const past = months.filter(m => m < nowKey);
+    return past.length ? past[past.length - 1] : months[months.length - 1];
+}
+
+function renderCloseCard() {
     const card = document.getElementById('closeCard');
     if (!card) return;
-    const info = balancePeriodInfo();
-    if (!info.month) { card.classList.add('hidden'); return; }
-    const cl = closeChecklist(info.month);
+    const month = closeCheckMonth();
+    if (!month) { card.classList.add('hidden'); return; }
+    const cl = closeChecklist(month);
     card.classList.remove('hidden');
-    document.getElementById('closeMonthLabel').textContent = info.month.replace('-', '年') + '月';
+    const ms = document.getElementById('closeMonthSelect');
+    if (ms) {
+        const opts = balanceMonths().slice(-24).reverse();
+        ms.innerHTML = opts.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>${m.replace('-', '年')}月</option>`).join('');
+        if (!ms.$wired) {
+            ms.$wired = true;
+            ms.addEventListener('change', () => { state.closeMonth = ms.value; saveState(); renderCloseCard(); updateNavBadges(); });
+        }
+    }
     const todo = cl.items.filter(i => i.state === 'warn').length;
     const scored = cl.items.filter(i => i.state !== 'info').length;
-    document.getElementById('closeProgress').textContent = todo === 0
-        ? `${info.month.replace('-', '年')}月已结清 · ${scored} 项全部通过`
-        : `还有 ${todo} 项待处理`;
+    const who = state.balanceOwner === 'all' ? '全家' : state.balanceOwner;
+    document.getElementById('closeProgress').textContent = (todo === 0
+        ? `已结清 · ${scored} 项全部通过`
+        : `还有 ${todo} 项待处理`) + ` · ${who}`;
 
     const ICONS = { ok: 'fa-circle-check', warn: 'fa-circle-exclamation', info: 'fa-circle-info' };
     const list = document.getElementById('closeList');
@@ -5654,6 +5927,21 @@ function renderBalanceCloseCard() {
             if (it && it.act) it.act.run();
         });
     });
+    updateNavBadges();
+}
+
+// 导航角标：结账清单里还有"待处理"就在报表分析上点个小红点。
+// 清单本身不显眼，容易被忽略；角标负责在别的页面时也提醒一句。
+function updateNavBadges() {
+    const dot = document.getElementById('navDotReports');
+    if (!dot) return;
+    let todo = 0;
+    try {
+        const m = closeCheckMonth();
+        if (m) todo = closeChecklist(m).items.filter(i => i.state === 'warn').length;
+    } catch (e) { todo = 0; }
+    dot.classList.toggle('hidden', todo === 0);
+    if (todo) dot.title = `有 ${todo} 项结账事项待处理`;
 }
 
 function balanceTrendMonths() {
@@ -6037,6 +6325,94 @@ function deleteBalanceSnapshot(id) {
     refreshOpenSurfaces();
     if (row && pushUndo('该期余额', { balances: [row] })) showUndoToast('该期余额');
     else showToast('已删除该期余额', 'success');
+}
+
+// ==================== 收益率口径面板 ====================
+// 以前只能靠"算不算活钱 / 算不算房产"两个总开关调，粒度太粗：
+// 想单独把某个基金剔出收益率就得改它的归类，改完资产负债页的分组也跟着乱了。
+function returnScopeGroups() {
+    const st = state.settings || {};
+    const auto = new Set((() => {
+        const keep = st.returnAccountMode;
+        st.returnAccountMode = 'auto';
+        const ids = investmentAccountIds();
+        st.returnAccountMode = keep;
+        return ids;
+    })());
+    const assets = state.accounts.filter(a => a.kind === 'asset');
+    const groups = [
+        { key: 'steady', title: '稳健理财', rows: assets.filter(a => a.bucket === 'steady') },
+        { key: 'growth', title: '长期投资', rows: assets.filter(a => a.bucket === 'growth') },
+        { key: 'cash', title: '活钱（一般不算）', rows: assets.filter(a => a.bucket === 'cash') },
+        { key: 'other', title: '其他', rows: assets.filter(a => !['steady', 'growth', 'cash'].includes(a.bucket)) },
+    ];
+    return { groups, auto, picked: new Set(investmentAccountIds()) };
+}
+
+function openReturnScope() {
+    const modal = document.getElementById('scopeModal');
+    if (!modal) return;
+    renderScopeModal();
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+}
+
+function closeReturnScope() {
+    const modal = document.getElementById('scopeModal');
+    if (modal) modal.classList.add('hidden');
+    renderReturns();
+}
+
+function renderScopeModal() {
+    const body = document.getElementById('scopeModalBody');
+    if (!body) return;
+    const { groups, auto, picked } = returnScopeGroups();
+    const manual = (state.settings || {}).returnAccountMode === 'manual';
+    document.getElementById('scopeModalSub').textContent = manual
+        ? `手动挑选中 · 共 ${picked.size} 个账户参与收益率`
+        : `按「四笔钱」归类自动选 · 共 ${picked.size} 个账户参与收益率`;
+    body.innerHTML = groups.map(g => {
+        if (!g.rows.length) return '';
+        return `<div class="scope-group">
+            <div class="scope-group-title">${_esc(g.title)}<span class="sg-count">${g.rows.length}</span></div>
+            ${g.rows.map(a => `<label class="scope-row">
+                <input type="checkbox" data-scope-account="${a.id}" ${picked.has(a.id) ? 'checked' : ''}>
+                <span class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></span>
+                <span class="sr-name">${_esc(a.name)}</span>
+                ${auto.has(a.id) ? '<span class="sr-tag">自动</span>' : ''}
+                <span class="sr-sub">${_esc(a.group || '')}</span>
+            </label>`).join('')}
+        </div>`;
+    }).join('') + `<div class="settings-sublabel scope-note">被选中的账户才会进收益率的分子和分母。本金未知（缺上月余额）的月份会自动跳过，不会当成 0% 拖低结果。</div>`;
+    body.querySelectorAll('[data-scope-account]').forEach(cb => cb.addEventListener('change', () => {
+        toggleScopeAccount(cb.dataset.scopeAccount);
+    }));
+    const reset = document.getElementById('scopeAutoBtn');
+    if (reset) {
+        reset.disabled = !manual;
+        reset.onclick = () => {
+            state.settings.returnAccountMode = 'auto';
+            state.settings.returnAccountIds = [];
+            saveState(); renderScopeModal(); refreshOpenSurfaces();
+            showToast('已恢复按归类自动选择', 'success');
+        };
+    }
+}
+
+function toggleScopeAccount(id) {
+    const st = state.settings || (state.settings = {});
+    // 第一次手动勾选时，把当前自动选中的那套原样搬进手动名单，避免"一勾就全丢"
+    if (st.returnAccountMode !== 'manual') {
+        st.returnAccountIds = investmentAccountIds();
+        st.returnAccountMode = 'manual';
+    }
+    const list = st.returnAccountIds;
+    const at = list.indexOf(id);
+    if (at >= 0) list.splice(at, 1); else list.push(id);
+    st.updatedAtSeed = Date.now();
+    saveState();
+    renderScopeModal();
+    refreshOpenSurfaces();
 }
 
 // ==================== 编辑单个账户（名称 / 类型 / 分类 / 图标 / 颜色）====================
@@ -6932,12 +7308,137 @@ function renderInsuranceSection() {
             <span class="ins-type">${type}</span>
             <span class="ins-field"><em>保额</em><input type="number" class="ins-amt" data-type="${type}" value="${p && p.amount ? p.amount : ''}" placeholder="0" inputmode="decimal"></span>
             <span class="ins-field"><em>年保费</em><input type="number" class="ins-prem" data-type="${type}" value="${p && p.premium ? p.premium : ''}" placeholder="0" inputmode="decimal"></span>
+            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"></span>
+            <button class="link-btn ins-claim-btn" type="button" data-claim="${type}">${claimSum(p)}${p && p.claims && p.claims.length ? `（${p.claims.length} 次）` : ''}</button>
         </div>`;
     }).join('');
 
     listBox.querySelectorAll('.ins-check input').forEach(cb => cb.addEventListener('change', () => upsertIns(cb.dataset.type, { covered: cb.checked })));
     listBox.querySelectorAll('.ins-amt').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { amount: parseFloat(inp.value) || 0 })));
     listBox.querySelectorAll('.ins-prem').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { premium: parseFloat(inp.value) || 0 })));
+    listBox.querySelectorAll('.ins-renew-at').forEach(inp => inp.addEventListener('change', () => {
+        const v = (inp.value || '').trim();
+        upsertIns(inp.dataset.type, { renewAt: v || null });
+    }));
+    listBox.querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => openInsClaims(btn.dataset.claim)));
+    const banner = document.getElementById('insRenewBanner');
+    if (banner) { banner.innerHTML = insRenewSummary(); banner.classList.toggle('hidden', !insUpcomingRenewals(30).length); }
+    updateInsBadges();
+}
+
+// 理赔金额小计
+function claimSum(p) {
+    const sum = ((p && p.claims) || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    return sum ? `已赔 ${formatCurrency(sum)}` : '理赔记录';
+}
+
+// 到期提醒扫全家，不是只扫当前看的那个人 —— 续保错过就白交了
+function insUpcomingRenewals(days) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const limit = days === undefined ? 30 : days;
+    return state.insurancePolicies.filter(p => p.covered && p.renewAt)
+        .map(p => {
+            const d = new Date(String(p.renewAt) + 'T00:00:00');
+            if (isNaN(d.getTime())) return null;
+            const diff = Math.round((d - today) / 86400000);
+            return diff <= limit ? { p, diff } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.diff - b.diff);
+}
+
+function insRenewSummary() {
+    const soon = insUpcomingRenewals(30);
+    if (!soon.length) return '';
+    const overdue = soon.filter(x => x.diff < 0);
+    const txt = soon.slice(0, 4).map(x =>
+        `${_esc(x.p.member)} 的 ${_esc(x.p.type)} ${x.diff < 0 ? `已过期 ${-x.diff} 天` : (x.diff === 0 ? '今天到期' : `还有 ${x.diff} 天`)}`
+    ).join('；');
+    const head = overdue.length === soon.length ? `${soon.length} 张保单都已过期`
+        : (overdue.length ? `${soon.length} 张保单要处理（其中 ${overdue.length} 张已过期）`
+            : `${soon.length} 张保单临近缴费/到期`);
+    return `<i class="fa-solid fa-bell"></i> <b>${head}</b>`
+        + `<span class="rb-hint">${txt}${soon.length > 4 ? ' …' : ''}</span>`;
+}
+
+function updateInsBadges() {
+    const dot = document.getElementById('navDotFunds');
+    if (!dot) return;
+    const n = insUpcomingRenewals(30).length;
+    dot.classList.toggle('hidden', n === 0);
+    dot.title = n ? `${n} 张保单临近缴费/到期` : '';
+}
+
+// ---- 理赔记录 ----
+let claimPolicyType = null;
+function insPolicyFor(type) { return insPolicy(type, fundEditMember); }
+
+function openInsClaims(type) {
+    const p = insPolicyFor(type);
+    if (!p) { showToast('先勾上这份保单再记理赔', 'info'); return; }
+    claimPolicyType = type;
+    const modal = document.getElementById('insClaimModal');
+    document.getElementById('insClaimTitle').textContent = `${p.member} · ${type} 理赔`;
+    renderInsClaims();
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+}
+
+function closeInsClaims() {
+    const modal = document.getElementById('insClaimModal');
+    if (modal) modal.classList.add('hidden');
+    claimPolicyType = null;
+}
+
+function renderInsClaims() {
+    const p = insPolicyFor(claimPolicyType);
+    if (!p) { closeInsClaims(); return; }
+    const list = (p.claims || []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    document.getElementById('insClaimSub').textContent =
+        `保额 ${formatCurrency(Number(p.amount) || 0)} · 已赔 ${formatCurrency((p.claims || []).reduce((s, c) => s + (Number(c.amount) || 0), 0))}`;
+    document.getElementById('insClaimList').innerHTML = list.length ? list.map(c => `
+        <div class="claim-row">
+            <span class="cr-date">${_esc(c.date || '')}</span>
+            <span class="cr-amt">${formatCurrency(Number(c.amount) || 0)}</span>
+            <span class="cr-note">${_esc(c.note || '')}</span>
+            <button class="bh-delete" type="button" data-claim-del="${_esc(c.id)}" title="删除"><i class="fa-solid fa-xmark"></i></button>
+        </div>`).join('') : '<div class="breakdown-empty">还没有理赔记录</div>';
+}
+
+function addInsClaim() {
+    const p = insPolicyFor(claimPolicyType);
+    if (!p) return;
+    const date = (document.getElementById('claimDate').value || '').trim();
+    const amount = parseFloat(document.getElementById('claimAmount').value);
+    if (!date) { showToast('选一下理赔日期', 'error'); return; }
+    if (!(amount > 0)) { showToast('理赔金额要大于 0', 'error'); return; }
+    const note = (document.getElementById('claimNote').value || '').trim();
+    if (!Array.isArray(p.claims)) p.claims = [];
+    const row = { id: `cl_${Date.now()}_${Math.floor(Math.random() * 1000)}`, date, amount, note, createdAt: Date.now() };
+    p.claims.push(row);
+    p.updatedAt = Date.now();
+    const label = `${p.type} 理赔 ${formatCurrency(amount)}`;
+    const canUndo = pushUndo(label, { claimAdd: [{ policyId: p.id, claimId: row.id }] });
+    saveState();
+    ['claimDate', 'claimAmount', 'claimNote'].forEach(id => { document.getElementById(id).value = ''; });
+    renderInsClaims();
+    renderInsuranceSection();
+    if (canUndo) showUndoToast(label);
+}
+
+function removeInsClaim(claimId) {
+    const p = insPolicyFor(claimPolicyType);
+    if (!p || !Array.isArray(p.claims)) return;
+    const at = p.claims.findIndex(c => c.id === claimId);
+    if (at < 0) return;
+    const row = p.claims[at];
+    p.claims.splice(at, 1);
+    p.updatedAt = Date.now();
+    const canUndo = pushUndo('删除的理赔记录', { claimDel: [{ policyId: p.id, claim: Object.assign({}, row) }] });
+    saveState();
+    renderInsClaims();
+    renderInsuranceSection();
+    if (canUndo) showUndoToast('删除的理赔记录');
 }
 
 function setInsMember(m) { fundEditMember = m; renderInsuranceSection(); }
@@ -7278,7 +7779,13 @@ function returnYears() { return [...new Set(returnMonths().map(m => m.slice(0, 4
 
 // 哪些账户算"投资账户"：沿用四笔钱的归类（稳健理财 + 长期投资），
 // 现金/房产/车辆/公积金算收益率没意义，还会被存取款严重扭曲。
+// 默认按「四笔钱」归类自动选；用户在「口径」面板里手勾过之后走手动名单。
 function investmentAccountIds() {
+    const st = state.settings || {};
+    if (st.returnAccountMode === 'manual') {
+        const ids = Array.isArray(st.returnAccountIds) ? st.returnAccountIds : [];
+        return state.accounts.filter(a => a.kind === 'asset' && ids.includes(a.id)).map(a => a.id);
+    }
     const includeCash = !!(state.settings && state.settings.returnIncludeCash);
     const wanted = includeCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth'];
     // 房产/车辆虽然归在"长期投资"，但市值几百万、收益基本不录，混进来只会把收益率摊平成 0
@@ -7848,17 +8355,22 @@ function renderReturnScope(info) {
     const prevM = mKey ? previousMonthOf(mKey) : null;
     const open = !!state.returnScopeOpen;
 
+    const manual = (state.settings || {}).returnAccountMode === 'manual';
     // 本金未知的账户是这一屏里唯一需要用户动手补的，所以留在折叠外面，不藏进详情
     const warnTxt = missing.length
         ? ` · <span class="rsl-warn">${_esc(missing.join('、'))} 本金未知，`
             + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></span>`
         : '';
+    const ruleTxt = manual
+        ? `手动挑选 <b>${names.length}</b> 个账户`
+        : `只统计<b>稳健理财 / 长期投资</b>${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}`;
     const head = `<span class="rsl-tag">口径</span>`
-        + `<span class="rsl-text" id="retScopeNote">只统计<b>稳健理财 / 长期投资</b>${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
+        + `<span class="rsl-text" id="retScopeNote">${ruleTxt}：`
         + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}${warnTxt}</span>`;
     const toggles = `<span class="rsl-actions">`
-        + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
-        + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
+        + `<button class="link-btn" id="retScopeOpen">调整</button>`
+        + (manual ? '' : `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`)
+        + (!manual && (outFixed.length || incFixed) ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
         + `<button class="link-btn rsl-more" id="retScopeMore">${open ? '收起' : '详情'}</button>`
         + `</span>`;
     const detail = open
@@ -7873,6 +8385,7 @@ function renderReturnScope(info) {
 
     const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
     bind('retScopeMore', () => { state.returnScopeOpen = !state.returnScopeOpen; saveState(); renderReturns(); });
+    bind('retScopeOpen', () => openReturnScope());
     bind('retGoBalance', () => { switchView('balance'); openBalanceModal(prevM); });
     bind('retScopeCash', () => { state.settings.returnIncludeCash = !state.settings.returnIncludeCash; saveState(); renderReturns(); });
     bind('retScopeFixed', () => { state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed; saveState(); renderReturns(); });
@@ -8657,6 +9170,8 @@ function initEventListeners() {
     // Balance sheet view
     initBalanceListeners();
     initAccountEditModal();
+    initRecurQueueModal();
+    initInsClaimModal();
 
     // 四笔钱
     initFundListeners();

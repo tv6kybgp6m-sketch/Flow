@@ -3853,3 +3853,76 @@ table.bill-stats {
 .acct-edit-actions { display: flex; gap: 10px; margin-top: 18px; }
 .acct-edit-actions .secondary-btn,
 .acct-edit-actions .primary-btn { flex: 1; justify-content: center; }
+
+/* ---- 导航角标 / 结账清单月份 / 口径面板 ---- */
+.nav-item { position: relative; }
+.nav-dot {
+    position: absolute; top: 8px; right: 14px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ff3b30; box-shadow: 0 0 0 2px var(--bg-sidebar);
+}
+.close-card .close-head h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-select.close-month { font-size: 13px; padding: 2px 8px; width: auto; }
+.scope-group { margin-bottom: 14px; }
+.scope-group-title {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;
+}
+.sg-count { font-size: 11px; color: var(--text-tertiary); background: var(--bg-input); border-radius: 8px; padding: 0 6px; }
+.scope-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 10px; cursor: pointer;
+}
+.scope-row:hover { background: var(--bg-card-hover); }
+.scope-row input { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.scope-row .breakdown-icon { width: 26px; height: 26px; font-size: 12px; flex: none; }
+.sr-name { flex: 1; min-width: 0; font-size: 14px; }
+.sr-tag { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 0 5px; }
+.sr-sub { font-size: 11px; color: var(--text-tertiary); }
+.scope-note { margin: 6px 2px 0; line-height: 1.6; }
+.scope-foot { display: flex; gap: 10px; margin-top: 16px; }
+.scope-foot .secondary-btn { flex: 1; justify-content: center; }
+.scope-foot .primary-btn { flex: 1; justify-content: center; }
+.scope-foot .secondary-btn:disabled { opacity: .45; cursor: default; }
+.dh-fixbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    background: var(--bg-input); border-radius: 10px; padding: 8px 12px; margin: 8px 0 10px;
+    font-size: 12.5px; color: var(--text-secondary);
+}
+.dh-fixbar .secondary-btn { padding: 5px 12px; font-size: 12.5px; }
+.dh-item .dh-fix { margin-top: 0; flex: none; font-size: 12px; }
+.recur-banner {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-card); border-left: 3px solid #ff9500;
+    border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
+}
+.recur-banner > i { color: #ff9500; }
+.rb-text { flex: 1; min-width: 0; font-size: 13px; }
+.rb-hint { color: var(--text-tertiary); font-size: 11.5px; margin-left: 6px; }
+.rq-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 0.5px solid var(--border); }
+.rq-main { flex: 1; min-width: 0; }
+.rq-name { font-size: 14px; }
+.rq-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+.rq-amt { width: 110px; flex: none; }
+.rq-skip { color: var(--text-tertiary); }
+@media (max-width: 640px) {
+    .rq-row { flex-wrap: wrap; }
+    .rq-amt { width: 100%; }
+}
+/* ---- 保险：到期提醒 / 理赔记录 ---- */
+.ins-row { flex-wrap: wrap; }
+.ins-field.ins-renew { min-width: 148px; }
+.ins-renew input { font-size: 12px; }
+.ins-claim-btn { flex: none; font-size: 12px; }
+.ins-renew-banner { border-left-color: #ff9500; margin: 0 0 10px; }
+.ins-renew-banner i { color: #ff9500; }
+.claim-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 0.5px solid var(--border); font-size: 13px; }
+.cr-date { color: var(--text-secondary); width: 92px; flex: none; }
+.cr-amt { font-weight: 600; width: 96px; flex: none; }
+.cr-note { flex: 1; min-width: 0; color: var(--text-tertiary); font-size: 12px; }
+.claim-form { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr auto; gap: 8px; margin-top: 14px; align-items: center; }
+@media (max-width: 640px) {
+    .claim-form { grid-template-columns: 1fr 1fr; }
+    .claim-form .secondary-btn { grid-column: 1 / -1; justify-content: center; }
+}
