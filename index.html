@@ -702,15 +702,21 @@
                                 </button>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">备份为 JSON<div class="settings-sublabel">完整账本，含余额 / 收益 / 成员</div></div>
+                                <div class="settings-label">导出备份<div class="settings-sublabel">存一份带日期的完整账本（交易 / 余额 / 收益 / 成员 / 删除标记），文件名带当天日期，可以攒很多份。开了加密的话存出去就是密文</div></div>
                                 <button class="secondary-btn" onclick="exportSyncJSON()">
-                                    <i class="fa-solid fa-file-code"></i> 导出 JSON
+                                    <i class="fa-solid fa-file-arrow-down"></i> 导出
                                 </button>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">从 JSON 恢复<div class="settings-sublabel">按记录合并，不会覆盖更新的数据</div></div>
+                                <div class="settings-label">导入 / 合并<div class="settings-sublabel">选一份备份文件，按记录比时间戳合并 —— 同一条谁新听谁的，所以拿旧备份导入<b>不会</b>把账退回过去。想回到某个时间点请用下面的「覆盖恢复」</div></div>
                                 <button class="secondary-btn" onclick="importJsonFile()">
-                                    <i class="fa-solid fa-rotate-left"></i> 导入 JSON
+                                    <i class="fa-solid fa-file-arrow-up"></i> 选文件
+                                </button>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">用备份覆盖恢复<div class="settings-sublabel">真正的回滚：先删掉不在那份备份里的记录，再按它重建。删除会同步到另一台设备，且<b>不能撤销</b> —— 动手前建议先点一次「导出备份」</div></div>
+                                <button class="secondary-btn danger-btn" onclick="restoreBackupOverwrite()">
+                                    <i class="fa-solid fa-clock-rotate-left"></i> 选文件覆盖
                                 </button>
                             </div>
                             <div class="settings-row" id="backupHistoryRow">
@@ -750,7 +756,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.34.3</div>
+                                    <div class="about-version">版本 1.34.4</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1314,7 +1320,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.34.3').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.34.4').catch(() => {});
             });
         }
     </script>

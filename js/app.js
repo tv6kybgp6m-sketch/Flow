@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.3';
+const APP_VERSION = '1.34.4';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -320,7 +320,7 @@ function saveStateNow() {
         // 写不进去绝不能装作成功：内存里还在，但关掉就没了
         const quota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
         __storageError = quota
-            ? '浏览器存储空间已满，新改动无法保存！请立刻用「备份为 JSON」导出，然后删除历史记录。'
+            ? '浏览器存储空间已满，新改动无法保存！请立刻用「导出备份」存一份，然后删除历史记录。'
             : ('保存失败：' + ((e && e.message) || '未知错误'));
         renderStorageWarning();
         showToast(__storageError, 'error');
@@ -351,7 +351,7 @@ function renderStorageWarning() {
             <button class="secondary-btn" onclick="exportSyncJSON()"><i class="fa-solid fa-download"></i> 立即备份</button>`;
     } else {
         bar.innerHTML = `<i class="fa-solid fa-circle-info"></i>
-            <span>账本已约 ${mb} MB，接近浏览器 5 MB 存储上限，建议先「备份为 JSON」。</span>
+            <span>账本已约 ${mb} MB，接近浏览器 5 MB 存储上限，建议先点「导出备份」。</span>
             <button class="secondary-btn" onclick="exportSyncJSON()">备份</button>`;
     }
 }
@@ -1633,7 +1633,7 @@ function renderDataHealth() {
             <div><span>数据所在地址</span><code>${_esc(s.origin)}</code></div>
             <div><span>本机设备号</span><code>${_esc(s.deviceId)}</code></div>
             <div class="dh-tip">浏览器按地址隔离数据：换一个地址（哪怕同一份程序）就是一本全新的账，
-                换设备请用「备份为 JSON / 导入 JSON」搬数据。${s.gist ? '云同步已开启。' : ''}</div>
+                换设备请用「导出备份」存一份、到新设备「导入 / 合并」。${s.gist ? '云同步已开启。' : ''}</div>
         </div>`;
     box.querySelectorAll('[data-dhfix]').forEach(btn =>
         btn.addEventListener('click', () => applyDataFix(btn.dataset.dhfix)));
@@ -2017,7 +2017,7 @@ async function renderBackupHistory() {
     const btn = document.getElementById('backupFolderBtn');
     if (!sub) return;
     if (!(isElectron() && window.electronAPI && typeof window.electronAPI.listBackups === 'function')) {
-        sub.textContent = '网页版没有本地归档，请定期「备份为 JSON」并存到别处';
+        sub.textContent = '网页版没有本地归档，请定期点「导出备份」并存到别处';
         if (btn) btn.classList.add('hidden');
         return;
     }
@@ -2032,7 +2032,7 @@ async function renderBackupHistory() {
         const newest = list[0];
         const when = Date.parse(newest.date);
         sub.textContent = `本机已保留 ${list.length} 份快照，最新一份 ${isNaN(when) ? '' : relTimeText(when)}`
-            + `（约 ${Math.max(1, Math.round((newest.bytes || 0) / 1024))} KB）· 恢复：选中文件后「导入 JSON」`;
+            + `（约 ${Math.max(1, Math.round((newest.bytes || 0) / 1024))} KB）· 恢复：选中文件后点「导入 / 合并」`;
         if (btn) btn.classList.remove('hidden');
     } catch (e) {
         sub.textContent = '读取备份列表失败';
@@ -2051,10 +2051,11 @@ function openBackupFolderClick() {
 }
 
 // 把一份 JSON 备份合并进当前账本
-async function applyImportedJSON(text) {
+// 读出一段备份文本背后的账本对象：解不开/格式不对会自己弹提示并返回 null
+async function decodeBackupText(text) {
     beginAskCycle(1);
     let parsed = null;
-    try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return null; }
     if (LedgerCrypto.looksEncrypted(parsed)) {
         let plain = null, lastMsg = '';
         for (let attempt = 0; attempt < 2 && !plain; attempt++) {
@@ -2064,28 +2065,105 @@ async function applyImportedJSON(text) {
             } catch (e) {
                 lastMsg = (e && e.message) || String(e);
                 if (lastMsg === 'WRONG_KEY' && attempt === 0) continue;
-                if (lastMsg === '已取消') return false;
+                if (lastMsg === '已取消') return null;
                 showToast('导入失败：' + lastMsg, 'error');
-                return false;
+                return null;
             }
         }
-        if (!plain) { showToast('导入失败：口令解不开这份备份', 'error'); return false; }
-        return applyImportedJSON(plain);
+        if (!plain) { showToast('导入失败：口令解不开这份备份', 'error'); return null; }
+        return decodeBackupText(plain);
     }
-    if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
+    if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return null; }
+    return parsed;
+}
+
+// 「覆盖恢复」要先把本地清掉。关键坑：不能照抄「清空数据」一律打墓碑 ——
+// 备份里的记录时间戳都比"现在"早，一律打墓碑的话，等下合并时会被自己的墓碑吃掉，
+// 结果什么也没恢复回来。所以只给"备份里没有、这次真的要删掉"的记录打墓碑。
+function wipeForReplace(data) {
+    const idsOf = list => new Set((Array.isArray(list) ? list : []).map(x => x && x.id));
+    const keep = {
+        transactions: idsOf(data.transactions), categories: idsOf(data.categories),
+        budgets: idsOf(data.budgets), accounts: idsOf(data.accounts),
+        balances: idsOf(data.balances), returns: idsOf(data.returns),
+        insurancePolicies: idsOf(data.insurancePolicies),
+    };
+    const mark = (list, coll) => (list || []).forEach(x => {
+        if (x && !keep[coll].has(x.id)) addTombstone(coll, x.id);
+    });
+    mark(state.transactions, 'transactions');
+    mark(state.categories, 'categories');
+    mark(state.budgets, 'budgets');
+    mark(state.accounts, 'accounts');
+    mark(state.balances, 'balances');
+    mark(state.returns, 'returns');
+    mark(state.insurancePolicies, 'insurance');
+
+    const keepPm = new Set(Array.isArray(data.paymentMethods) ? data.paymentMethods : []);
+    state.paymentMethods.filter(p => !keepPm.has(p)).forEach(p => addTombstone('paymentMethods', p));
+    const keepMem = new Set(Array.isArray(data.balanceMembers) ? data.balanceMembers : []);
+    state.balanceMembers.filter(m => m !== '本人' && !keepMem.has(m)).forEach(m => addTombstone('members', m));
+    const keepIns = new Set(Array.isArray(data.insuranceMembers) ? data.insuranceMembers : []);
+    state.insuranceMembers.filter(m => m !== '本人' && !keepIns.has(m)).forEach(m => addTombstone('insuranceMembers', m));
+
+    // 内置账户/分类会被默认值补回来，所以只给"用户自己加的、且备份里没有"的打墓碑
+    const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
+    state.accounts.filter(a => !defaultIds.has(a.id)).forEach(a => { if (!keep.accounts.has(a.id)) addTombstone('accounts', a.id); });
+    const defaultCats = new Set([...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES].map(c => c.id));
+    state.categories.filter(c => !defaultCats.has(c.id)).forEach(c => { if (!keep.categories.has(c.id)) addTombstone('categories', c.id); });
+
+    state.accounts = DEFAULT_ACCOUNTS.map(a => Object.assign({}, a));
+    state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
+    state.transactions = []; state.budgets = []; state.balances = []; state.returns = [];
+    state.insurancePolicies = []; state.paymentMethods = []; state.pmAddedAt = {};
+    state.memberAddedAt = {}; state.insuranceMemberAddedAt = {};
+    state.balanceMembers = ['本人']; state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
+    state.balanceOwner = 'all';
+}
+
+async function applyImportedJSON(text, opts) {
+    // 明文备份走同步快路：先就地解析，只有加密的才 await 解锁。
+    // （改成"进函数先 await"会让不 await 调用方的老代码看到"什么都没发生"）
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    if (LedgerCrypto.looksEncrypted(parsed)) {
+        parsed = await decodeBackupText(text);
+        if (!parsed) return false;
+    } else if (!parsed || !parsed.data) {
+        showToast('导入失败：文件里没有账本数据', 'error');
+        return false;
+    }
+    const replace = !!(opts && opts.replace);
+    if (replace) {
+        const d = parsed.data;
+        const n = list => (Array.isArray(list) ? list.length : 0);
+        if (!confirm(`用这份备份【覆盖】当前账本？
+
+当前：交易 ${state.transactions.length} 笔、余额 ${state.balances.length} 条、收益 ${state.returns.length} 条
+备份：交易 ${n(d.transactions)} 笔、余额 ${n(d.balances)} 条、收益 ${n(d.returns)} 条
+
+不在备份里的现有记录会被删除，并且这个删除会同步到另一台设备。覆盖不能撤销 —— 建议先点「导出备份」把现在的数据存一份。`)) return false;
+        wipeForReplace(d);
+    }
     mergeRemoteData(parsed);
     applyTheme(state.settings.theme);
     renderView(state.currentView);
     updateSidebarSummary();
-    showToast('已导入并合并 JSON 备份', 'success');
+    updateICloudSyncUI();
+    showToast(replace ? '已按这份备份覆盖恢复' : '已导入并合并 JSON 备份', 'success');
     return true;
 }
 
-async function importJsonFile() {
+async function importJsonFile(opts) {
     const picked = await pickLocalFile(['json']);
     if (!picked) return;
     if (picked.error) { showToast(picked.error, 'error'); return; }
-    applyImportedJSON(base64ToText(picked.base64));
+    applyImportedJSON(base64ToText(picked.base64), opts);
+}
+
+// 真正的回滚入口：先清掉本地、再按那份备份重建
+function restoreBackupOverwrite() {
+    return importJsonFile({ replace: true });
 }
 
 // PWA: Import from iCloud (file input)
@@ -2138,20 +2216,14 @@ function updateICloudSyncUI() {
         container.innerHTML = `
             <div class="icloud-status">
                 <div class="settings-row">
-                    <div class="settings-label">从 iCloud 导入<div class="settings-sublabel">选择之前导出的同步文件</div></div>
-                    <button class="secondary-btn" onclick="importJsonFile()">
-                        <i class="fa-solid fa-cloud-arrow-down"></i> 导入
-                    </button>
-                </div>
-                <div class="settings-row">
-                    <div class="settings-label">导出到 iCloud<div class="settings-sublabel">存到 iCloud Drive 的「记账本」文件夹，文件名 ${ICLOUD_SYNC_FILENAME}，Mac 端会自动读到</div></div>
+                    <div class="settings-label">存为 iCloud 同步文件<div class="settings-sublabel">存成固定的 ${ICLOUD_SYNC_FILENAME}，Mac 端会自动读到；同名会盖掉上一次，所以它只是"最新一份"，想留历史请用上面的「导出备份」</div></div>
                     <button class="secondary-btn" onclick="exportToICloud()">
-                        <i class="fa-solid fa-cloud-arrow-up"></i> 导出
+                        <i class="fa-solid fa-cloud-arrow-up"></i> 存一份
                     </button>
                 </div>
                 <div class="icloud-hint">
                     <i class="fa-solid fa-circle-info"></i>
-                    Mac 端自动同步，手机端点「导入」即可获取 Mac 最新数据
+                    浏览器读不到 iCloud：想把 Mac 的数据拿过来，用上面的「导入 / 合并」，在文件选择里选 iCloud Drive → 记账本 → 那个文件
                 </div>
                 <div class="icloud-status-info">上次操作: ${timeStr}</div>
             </div>
@@ -5919,7 +5991,7 @@ function closeChecklist(month) {
     const DAY = 86400000;
     if (isElectron()) {
         if (typeof iCloudSyncEnabled === 'undefined' || !iCloudSyncEnabled) {
-            items.push({ state: 'info', text: '未开启 iCloud 同步，请确认手机数据已经通过「导入 JSON」合并进来', act: null });
+            items.push({ state: 'info', text: '未开启 iCloud 同步，请确认手机数据已经通过「导入 / 合并」传过来', act: null });
         } else {
             const age = iCloudLastSyncTime ? Math.floor((Date.now() - iCloudLastSyncTime) / DAY) : null;
             items.push(age === null
