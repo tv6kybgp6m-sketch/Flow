@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.2';
+const APP_VERSION = '1.34.3';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7183,6 +7183,17 @@ function insCoveredCount() {
 function insTotalAmount() {
     return INSURANCE_TYPES.reduce((s, t) => s + insTypeAmount(t), 0);
 }
+// 某个成员名下的年保费（只算已配置的；没勾上的那份不算钱）
+function memberPremium(member) {
+    return state.insurancePolicies
+        .filter(p => p.member === member && p.covered)
+        .reduce((s, p) => s + (Number(p.premium) || 0), 0);
+}
+function memberPremiumText(member) {
+    const n = memberPremium(member);
+    return n ? formatCurrency(n) : '—';
+}
+
 function insTotalPremium() {
     return state.insurancePolicies.filter(p => p.covered).reduce((s, p) => s + (Number(p.premium) || 0), 0);
 }
@@ -7342,10 +7353,12 @@ function renderInsuranceSection() {
     const listBox = document.getElementById('insList');
     if (!membersBox || !listBox) return;
     membersBox.innerHTML = state.insuranceMembers.map(m =>
-        `<span class="ins-member-wrap"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}">${_esc(m)}</button>` +
+        `<span class="ins-member-wrap"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}" title="${_esc(m)} 的年保费">${_esc(m)}<span class="im-prem">${memberPremiumText(m)}</span></button>` +
         `<i class="fa-solid fa-pen" data-insact="rename" data-insmember="${_esc(m)}" title="改名"></i>` +
         `<i class="fa-solid fa-xmark" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
-    ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`;
+    ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`
+        // 全家一年要交多少保费，以前得自己把每个人头上的数加起来
+        + `<span class="ins-prem-total">全部保费 <b>${formatCurrency(insTotalPremium())}</b>/年</span>`;
 
     if (!membersBox.$wired) {
         membersBox.$wired = true;
