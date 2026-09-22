@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.1';
+const APP_VERSION = '1.34.2';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -189,7 +189,7 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [] },  // soft-delete markers  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
@@ -301,6 +301,15 @@ function saveStateNow() {
         // 不存的话刷新一次，被跳过的那期又会冒出来，等于跳过没生效。
         pendingRecurring: state.pendingRecurring || [],
         recurringSkipped: state.recurringSkipped || {},
+        // 成员筛选和三个页面的时间档：以前每次打开都回到"全部 + 月报"，
+        // 天天看同一本账的人等于每天重新点一遍。
+        uiPrefs: {
+            balanceOwner: state.balanceOwner,
+            balancePeriod: state.balancePeriod,
+            reportPeriod: state.reportPeriod,
+            returnPeriod: state.returnPeriod,
+            closeMonth: state.closeMonth,
+        },
     };
     const text = JSON.stringify(data);
     __lastSavedBytes = text.length;
@@ -354,6 +363,7 @@ const UNDO_BUCKET = {
     transactions: 'transactions', balances: 'balances', returns: 'returns',
     accounts: 'accounts', categories: 'categories', budgets: 'budgets',
     insurancePolicies: 'insurance', paymentMethods: 'paymentMethods',
+    recurring: 'recurring',
 };
 let __undoStack = [];
 
@@ -835,9 +845,13 @@ function renderRecurringSection() {
         if (t.dataset.recurToggle) { rule.active = !rule.active; rule.updatedAt = Date.now(); saveState(); renderRecurringSection(); }
         else if (t.dataset.recurDel) {
             if (!confirm(`删除规则「${rule.note || rule.categoryId}」？已生成的交易不会被删除。`)) return;
+            const gone = state.recurring.find(x => x.id === id);
             state.recurring = state.recurring.filter(x => x.id !== id);
+            addTombstone('recurring', id);        // 不写墓碑的话，另一台设备会把它带回来
+            const canUndo = pushUndo(`规则「${rule.note || rule.categoryId}」`, { recurring: gone ? [gone] : [] });
             saveState(); renderRecurringSection();
-            showToast('规则已删除', 'success');
+            if (canUndo) showUndoToast(`规则「${rule.note || rule.categoryId}」`);
+            else showToast('规则已删除', 'success');
         } else if (t.dataset.recurRun) {
             const made = runRecurringRules(false);
             if (!made.length) showToast('这一期已经记过或已跳过', 'info');
@@ -903,6 +917,7 @@ function normalizeTombstones(raw) {
         members: clean(src.members),
         insuranceMembers: clean(src.insuranceMembers),
         insurance: clean(src.insurance),
+        recurring: clean(src.recurring),
     };
 }
 
@@ -951,6 +966,7 @@ function applyTombstones() {
     state.accounts = drop(state.accounts, state.deleted.accounts);
     state.balances = drop(state.balances, state.deleted.balances);
     state.returns = drop(state.returns, state.deleted.returns);
+    state.recurring = drop(state.recurring || [], state.deleted.recurring);
     state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
 
     // 成员名单也是「名字即身份」的纯字符串，所以「什么时候加的」记在 memberAddedAt，
@@ -1076,6 +1092,9 @@ function buildSyncPayload() {
             settings: state.settings,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
+            // 周期规则也要走同步：不然 Mac 上建的房租规则，手机上根本不存在，
+            // 待确认队列就永远只在 Mac 上冒出来。队列本身仍是本机的（确认是"人+设备"的动作）。
+            recurring: state.recurring,
         },
     };
 }
@@ -1196,7 +1215,9 @@ function fingerprintOfPayload(p) {
         (d.balanceMembers || []).slice().sort().join(','),
         (d.insuranceMembers || []).slice().sort().join(','),
         JSON.stringify(d.fundTargets || {}),
+        sig(d.recurring),
         sig(del.transactions), sig(del.balances), sig(del.returns), sig(del.accounts), sig(del.insurance),
+        sig(del.recurring),
     ].join('|');
 }
 
@@ -1281,6 +1302,7 @@ function mergeRemoteData(remoteData) {
         members: mergeTombstoneList(state.deleted.members, remoteDeleted.members),
         insuranceMembers: mergeTombstoneList(state.deleted.insuranceMembers, remoteDeleted.insuranceMembers),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
+        recurring: mergeTombstoneList(state.deleted.recurring, remoteDeleted.recurring),
     };
 
     // 保险清单：按 id 取并集，较新的赢；成员取并集；目标金额取较新的一份
@@ -1296,6 +1318,15 @@ function mergeRemoteData(remoteData) {
     Object.keys(remoteInsAdded).forEach(k => {
         if (!state.insuranceMemberAddedAt[k] || remoteInsAdded[k] > state.insuranceMemberAddedAt[k]) state.insuranceMemberAddedAt[k] = remoteInsAdded[k];
     });
+    // 周期规则：按 id 并集、较新的一份赢；删除靠上面的墓碑生效
+    const ruleMap = new Map();
+    (state.recurring || []).forEach(r => ruleMap.set(r.id, r));
+    (remote.recurring || []).forEach(r => {
+        const cur = ruleMap.get(r.id);
+        if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) ruleMap.set(r.id, r);
+    });
+    state.recurring = Array.from(ruleMap.values());
+
     // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
     state.balanceMembers = [...new Set([...(state.balanceMembers || []), ...(remote.balanceMembers || [])])];
     const remoteMemAdded = normalizeAddedAtMap(remote.memberAddedAt);
@@ -1495,6 +1526,11 @@ function dataHealthCheck() {
     if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)), { label: '去重', kind: 'dups' });
 
     // 账户平时在记、中间却断了几个月：这是最常见的漏记
+    // 保险到期提醒只扫填了日期的保单 —— 没填的人永远收不到提醒，也没人告诉他为什么
+    const noRenew = state.insurancePolicies.filter(p => p.covered && !p.renewAt);
+    if (noRenew.length) add('info', `${noRenew.length} 张已配置的保单没填缴费/到期日，到期提醒不会算它`,
+        shorten(noRenew.map(p => `${p.member}·${p.type}`)));
+
     const gaps = [];
     const byAcct = {};
     state.balances.forEach(b => {
@@ -2563,6 +2599,12 @@ function loadState() {
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
             state.lastExportAt = Number(data.lastExportAt) || 0;
+            const ui = data.uiPrefs || {};
+            if (ui.balanceOwner === 'all' || state.balanceMembers.includes(ui.balanceOwner)) state.balanceOwner = ui.balanceOwner;
+            ['balancePeriod', 'reportPeriod', 'returnPeriod'].forEach(k => {
+                if (['month', 'year', 'all'].indexOf(ui[k]) >= 0) state[k] = ui[k];
+            });
+            if (typeof ui.closeMonth === 'string') state.closeMonth = ui.closeMonth;
             // 仪表盘页面已移除：旧设置迁移到交易记录
             if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
 
