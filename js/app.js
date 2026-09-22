@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.0';
+const APP_VERSION = '1.34.1';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -297,6 +297,10 @@ function saveStateNow() {
         pmAddedAt: state.pmAddedAt,
         lastExportAt: state.lastExportAt,
         recurring: state.recurring,
+        // 待确认队列和"这期我跳过了"的标记必须落盘：
+        // 不存的话刷新一次，被跳过的那期又会冒出来，等于跳过没生效。
+        pendingRecurring: state.pendingRecurring || [],
+        recurringSkipped: state.recurringSkipped || {},
     };
     const text = JSON.stringify(data);
     __lastSavedBytes = text.length;
@@ -2544,6 +2548,9 @@ function loadState() {
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
+            state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
+            state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
+                ? data.recurringSkipped : {};
             state.memberAddedAt = Object.assign({}, data.memberAddedAt || {});
             state.insuranceMemberAddedAt = Object.assign({}, data.insuranceMemberAddedAt || {});
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
@@ -5799,6 +5806,8 @@ function balanceCandidateAccounts() {
 
 function closeChecklist(month) {
     const member = state.balanceOwner;
+    // 周期账改成待确认后，"这个月有几笔还没入账"也是每月要做的一步
+    const pend = (state.pendingRecurring || []).filter(p => p.date && p.date.slice(0, 7) === month);
     const map = balancesAtMonth(month, member);
     const cands = balanceCandidateAccounts();
     const missingBal = cands.filter(a => map[a.id] === undefined || map[a.id] === null);
@@ -5838,8 +5847,13 @@ function closeChecklist(month) {
             : {
                 state: 'warn',
                 text: `有 ${formatCurrency(Math.abs(b.unexplained))} 对不上：可能是漏记流水、余额记错，或者收益没录`,
-                act: { label: '看变动明细', run: () => document.getElementById('bridgeCard')
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+                // 变动桥在资产负债页里；清单搬到报表页之后，光 scrollIntoView
+                // 会滚到一个 display:none 的元素上，点了没反应 —— 必须先切页。
+                act: { label: '看变动明细', run: () => {
+                    switchView('balance');
+                    setTimeout(() => document.getElementById('bridgeCard')
+                        ?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+                } },
             });
     }
 
@@ -5849,6 +5863,15 @@ function closeChecklist(month) {
             state: 'warn', text: '这个月一笔流水都没有，可能还没开始记',
             act: { label: '去记一笔', run: () => { switchView('transactions'); openTransactionModal(); } },
         });
+
+    // 周期账待确认：这个月有几笔房租/工资还压在队列里没入账
+    if (pend.length) {
+        items.push({
+            state: 'warn',
+            text: `这个月有 ${pend.length} 笔周期账还没确认入账`,
+            act: { label: '去确认', run: () => { switchView('transactions'); openRecurQueue(); } },
+        });
+    }
 
     // 同步新鲜度：月结最怕拿着一份旧账在核对
     const DAY = 86400000;
