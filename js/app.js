@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.4';
+const APP_VERSION = '1.34.5';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2121,6 +2121,60 @@ function wipeForReplace(data) {
     state.balanceOwner = 'all';
 }
 
+const SYNC_BUCKETS = {
+    transactions: 'transactions', categories: 'categories', budgets: 'budgets',
+    accounts: 'accounts', balances: 'balances', returns: 'returns',
+    insurancePolicies: 'insurance', paymentMethods: 'paymentMethods',
+    balanceMembers: 'members', insuranceMembers: 'insuranceMembers', recurring: 'recurring',
+};
+
+// 备份里存在的记录，它们身上的删除标记要一并抹掉。
+// 否则「8 月手滑删了一条 → 9 月想用 8 月的备份退回去」这条路会失败：
+// 删除标记的时间是"现在"，备份里那条的时间是 8 月，合并时被判定成"已删除"直接吃掉。
+function clearTombstonesFor(data) {
+    Object.keys(SYNC_BUCKETS).forEach(coll => {
+        const bucket = state.deleted[SYNC_BUCKETS[coll]];
+        const list = data[coll];
+        if (!Array.isArray(bucket) || !bucket.length || !Array.isArray(list)) return;
+        const ids = new Set(list.map(x => (typeof x === 'string' ? x : (x && x.id))).filter(Boolean));
+        state.deleted[SYNC_BUCKETS[coll]] = bucket.filter(t => !ids.has(t.id));
+    });
+}
+
+// 「补回缺失」：只把"备份里有、本地没有"的记录捞回来，本地已有的一条不动、也不删任何东西。
+// 复活时把 updatedAt 刷成现在 —— 不刷的话，别的设备（和本机残留的标记）会把它再次吃掉。
+function recoverMissingFromBackup(data) {
+    const report = { added: 0, byKind: {} };
+    Object.keys(SYNC_BUCKETS).forEach(coll => {
+        const bucketName = SYNC_BUCKETS[coll];
+        const list = Array.isArray(data[coll]) ? data[coll] : [];
+        const target = coll === 'balanceMembers' ? state.balanceMembers
+            : coll === 'insuranceMembers' ? state.insuranceMembers : state[coll];
+        if (!Array.isArray(target)) return;
+        const have = new Set(target.map(x => (typeof x === 'string' ? x : (x && x.id))));
+        list.forEach(row => {
+            const key = typeof row === 'string' ? row : (row && row.id);
+            if (!key || have.has(key)) return;
+            if (Array.isArray(state.deleted[bucketName])) {
+                state.deleted[bucketName] = state.deleted[bucketName].filter(t => t.id !== key);
+            }
+            if (coll === 'balanceMembers' || coll === 'insuranceMembers') {
+                target.push(key);
+                const at = coll === 'balanceMembers' ? state.memberAddedAt : state.insuranceMemberAddedAt;
+                at[key] = Date.now();
+            } else {
+                const clone = Object.assign({}, row);
+                clone.updatedAt = Date.now();
+                target.push(clone);
+            }
+            have.add(key);
+            report.added++;
+            report.byKind[coll] = (report.byKind[coll] || 0) + 1;
+        });
+    });
+    return report;
+}
+
 async function applyImportedJSON(text, opts) {
     // 明文备份走同步快路：先就地解析，只有加密的才 await 解锁。
     // （改成"进函数先 await"会让不 await 调用方的老代码看到"什么都没发生"）
@@ -2133,7 +2187,19 @@ async function applyImportedJSON(text, opts) {
         showToast('导入失败：文件里没有账本数据', 'error');
         return false;
     }
-    const replace = !!(opts && opts.replace);
+    const mode = (opts && opts.mode) || (opts && opts.replace ? 'replace' : 'merge');
+    const replace = mode === 'replace';
+    if (mode === 'recover') {
+        const rep = recoverMissingFromBackup(parsed.data);
+        saveState();
+        applyTheme(state.settings.theme);
+        renderView(state.currentView);
+        updateSidebarSummary();
+        updateICloudSyncUI();
+        showToast(rep.added ? `已补回 ${rep.added} 条记录，本地原有的没动` : '备份里没有可补回的记录（一条都没少）',
+            rep.added ? 'success' : 'info');
+        return true;
+    }
     if (replace) {
         const d = parsed.data;
         const n = list => (Array.isArray(list) ? list.length : 0);
@@ -2145,6 +2211,8 @@ async function applyImportedJSON(text, opts) {
 不在备份里的现有记录会被删除，并且这个删除会同步到另一台设备。覆盖不能撤销 —— 建议先点「导出备份」把现在的数据存一份。`)) return false;
         wipeForReplace(d);
     }
+    // 覆盖恢复 = 以备份为准，所以备份里有的记录不能留着旧的删除标记
+    if (replace) clearTombstonesFor(parsed.data);
     mergeRemoteData(parsed);
     applyTheme(state.settings.theme);
     renderView(state.currentView);
@@ -2163,7 +2231,12 @@ async function importJsonFile(opts) {
 
 // 真正的回滚入口：先清掉本地、再按那份备份重建
 function restoreBackupOverwrite() {
-    return importJsonFile({ replace: true });
+    return importJsonFile({ mode: 'replace' });
+}
+
+// 治手滑删除的入口：只补回缺的，不删任何东西
+function restoreBackupMissing() {
+    return importJsonFile({ mode: 'recover' });
 }
 
 // PWA: Import from iCloud (file input)

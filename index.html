@@ -714,6 +714,12 @@
                                 </button>
                             </div>
                             <div class="settings-row">
+                                <div class="settings-label">从备份补回缺失的记录<div class="settings-sublabel">治手滑删除：把「备份里有、你现在没有」的记录原样捞回来（含被误删的账户 / 分类 / 成员），你本地已有的<b>一条不改</b>，也<b>不删任何东西</b>。补回来的记录会同步给另一台设备</div></div>
+                                <button class="secondary-btn" onclick="restoreBackupMissing()">
+                                    <i class="fa-solid fa-rotate-left"></i> 选文件补回
+                                </button>
+                            </div>
+                            <div class="settings-row">
                                 <div class="settings-label">用备份覆盖恢复<div class="settings-sublabel">真正的回滚：先删掉不在那份备份里的记录，再按它重建。删除会同步到另一台设备，且<b>不能撤销</b> —— 动手前建议先点一次「导出备份」</div></div>
                                 <button class="secondary-btn danger-btn" onclick="restoreBackupOverwrite()">
                                     <i class="fa-solid fa-clock-rotate-left"></i> 选文件覆盖
@@ -756,7 +762,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.34.4</div>
+                                    <div class="about-version">版本 1.34.5</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1320,7 +1326,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.34.4').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.34.5').catch(() => {});
             });
         }
     </script>
