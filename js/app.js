@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.5';
+const APP_VERSION = '1.34.6';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6581,21 +6581,32 @@ function renderScopeModal() {
     document.getElementById('scopeModalSub').textContent = manual
         ? `手动挑选中 · 共 ${picked.size} 个账户参与收益率`
         : `按「四笔钱」归类自动选 · 共 ${picked.size} 个账户参与收益率`;
-    body.innerHTML = groups.map(g => {
+    body.innerHTML = `<div class="scope-head">
+            <span></span><span>账户</span><span></span><span>记收益</span><span>算收益率</span><span></span>
+        </div>` + groups.map(g => {
         if (!g.rows.length) return '';
         return `<div class="scope-group">
             <div class="scope-group-title">${_esc(g.title)}<span class="sg-count">${g.rows.length}</span></div>
-            ${g.rows.map(a => `<label class="scope-row">
-                <input type="checkbox" data-scope-account="${a.id}" ${picked.has(a.id) ? 'checked' : ''}>
+            ${g.rows.map(a => `<div class="scope-row">
                 <span class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></span>
                 <span class="sr-name">${_esc(a.name)}</span>
-                ${auto.has(a.id) ? '<span class="sr-tag">自动</span>' : ''}
+                ${auto.has(a.id) ? '<span class="sr-tag">自动</span>' : '<span class="sr-tag ph">自动</span>'}
+                <input type="checkbox" data-scope-earn="${a.id}" ${accountEarnsReturn(a) ? 'checked' : ''} title="会不会出现在「记收益」列表里">
+                <input type="checkbox" data-scope-account="${a.id}" ${picked.has(a.id) ? 'checked' : ''} title="算不算进收益率">
                 <span class="sr-sub">${_esc(a.group || '')}</span>
-            </label>`).join('')}
+            </div>`).join('')}
         </div>`;
-    }).join('') + `<div class="settings-sublabel scope-note">被选中的账户才会进收益率的分子和分母。本金未知（缺上月余额）的月份会自动跳过，不会当成 0% 拖低结果。</div>`;
+    }).join('') + `<div class="settings-sublabel scope-note">「记收益」= 出现在记收益列表；「算收益率」= 进收益率的分子分母。本金未知的月份会自动跳过。</div>`;
     body.querySelectorAll('[data-scope-account]').forEach(cb => cb.addEventListener('change', () => {
         toggleScopeAccount(cb.dataset.scopeAccount);
+    }));
+    body.querySelectorAll('[data-scope-earn]').forEach(cb => cb.addEventListener('change', () => {
+        const a = accountById(cb.dataset.scopeEarn);
+        if (!a) return;
+        setAccountEarnsReturn(a, cb.checked);
+        saveState();
+        renderScopeModal();
+        refreshOpenSurfaces();
     }));
     const reset = document.getElementById('scopeAutoBtn');
     if (reset) {
@@ -6635,12 +6646,14 @@ function openAccountEdit(accountId) {
     const a = accountById(accountId);
     if (!a) { showToast('账户不存在', 'error'); return; }
     editingAccountId = accountId;
-    acctEditDraft = { icon: a.icon || 'fa-wallet', color: a.color || '#007aff' };
+    acctEditDraft = { icon: a.icon || 'fa-wallet', color: a.color || '#007aff', earnsReturn: accountEarnsReturn(a) };
     document.getElementById('acctEditName').value = a.name;
     document.getElementById('acctEditSub').textContent = `${a.group || (a.kind === 'liability' ? '负债' : '资产')} · ${(state.balances.filter(b => b.accountId === a.id).length)} 期余额 · ${(state.returns.filter(r => r.accountId === a.id).length)} 期收益`;
     const kindSel = document.getElementById('acctEditKind');
     kindSel.value = a.kind;
     paintAcctEditGroups(a.kind, a.group);
+    const er = document.getElementById('acctEditEarns');
+    if (er) { er.checked = acctEditDraft.earnsReturn; }
     renderAcctEditPickers();
     const modal = document.getElementById('accountEditModal');
     modal.classList.remove('hidden');
@@ -6681,7 +6694,9 @@ function saveAccountEdit() {
     const kind = document.getElementById('acctEditKind').value === 'liability' ? 'liability' : 'asset';
     let group = document.getElementById('acctEditGroup').value;
     if (!groupsForKind(kind).includes(group)) group = groupsForKind(kind)[0];
-    Object.assign(a, { name, kind, group, icon: acctEditDraft.icon, color: acctEditDraft.color, updatedAt: Date.now() });
+    Object.assign(a, { name, kind, group, icon: acctEditDraft.icon, color: acctEditDraft.color,
+        earnsReturn: kind === 'asset' ? !!acctEditDraft.earnsReturn : undefined, updatedAt: Date.now() });
+    if (kind !== 'asset' && a.earnsReturn === undefined) delete a.earnsReturn;
     ensureAccountOrder();
     saveState();
     refreshOpenSurfaces();
@@ -6704,6 +6719,8 @@ function initAccountEditModal() {
         if (!el) return;
         acctEditDraft.color = el.dataset.color; renderAcctEditPickers();
     });
+    const earns = document.getElementById('acctEditEarns');
+    if (earns) earns.addEventListener('change', () => { acctEditDraft.earnsReturn = earns.checked; });
 }
 
 // ==================== 「还有记录，删不掉」弹窗 ====================
@@ -8154,6 +8171,28 @@ function returnMonthHasRecords(month) {
 
 // 只列用户真正持有的资产账户（记过余额/收益），但用户自己新建的账户一律列出——
 // 否则刚加的账户还没有任何记录，出现在弹窗里的话会像是没生效。
+// 这个账户会不会有收益。用户在「编辑账户 / 口径」里明确设过就听他的，
+// 否则按分类推断：只有「储蓄存款」和「投资理财」默认会生收益 ——
+// 现金、储蓄卡、应收借款（借出去的钱）、房产车辆这些，本来就不会"涨出收益"这一栏。
+function accountEarnsReturn(a) {
+    if (!a || a.kind !== 'asset') return false;
+    if (a.earnsReturn === true || a.earnsReturn === false) return a.earnsReturn;
+    return a.group === '储蓄存款' || a.group === '投资理财';
+}
+function setAccountEarnsReturn(a, on) {
+    a.earnsReturn = !!on;
+    a.updatedAt = Date.now();
+}
+
+// 记收益弹窗该列哪些账户：会生收益的 + 这个月已经录过的
+// （已经录过的必须能改，哪怕后来把开关关了，否则历史就锁死了）
+function returnEntryAccounts(month, member) {
+    const all = returnCandidateAccounts();
+    if (state.returnEntryShowAll) return all;
+    const recorded = new Set(Object.keys(returnsAtMonth(month, member) || {}));
+    return all.filter(a => accountEarnsReturn(a) || recorded.has(a.id));
+}
+
 function returnCandidateAccounts() {
     const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
     const held = new Set();
@@ -9165,7 +9204,8 @@ function renderReturnEntry() {
     if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月各账户收益` : '请先选择月份';
     const list = document.getElementById('returnEntryList');
     if (!list) return;
-    const accounts = returnCandidateAccounts();
+    const accounts = returnEntryAccounts(month, member);
+    const hiddenOnes = returnCandidateAccounts().filter(a => !accounts.includes(a));
     if (!accounts.length) {
         list.innerHTML = '<div class="breakdown-empty">还没有资产账户，先到「资产负债」里添加</div>';
         return;
@@ -9198,7 +9238,17 @@ function renderReturnEntry() {
                        value="${flowOf(a.id)}" placeholder="0">
             </div>` : ''}
         </div>`;
-    }).join('');
+    }).join('') + (hiddenOnes.length ? `
+        <div class="re-hidden-note">
+            <span>另有 ${hiddenOnes.length} 个账户不生收益、没列出来：${_esc(hiddenOnes.map(a => a.name).join('、'))}</span>
+            <button class="link-btn" type="button" id="reShowAll">显示全部</button>
+        </div>` : (state.returnEntryShowAll ? `
+        <div class="re-hidden-note"><button class="link-btn" type="button" id="reShowAll">只看会生收益的</button></div>` : ''));
+    const toggle = document.getElementById('reShowAll');
+    if (toggle) toggle.addEventListener('click', () => {
+        state.returnEntryShowAll = !state.returnEntryShowAll;
+        renderReturnEntry();
+    });
     bindReturnRatePreview();
 }
 

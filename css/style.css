@@ -3938,3 +3938,30 @@ table.bill-stats {
 @media (max-width: 640px) {
     .ins-prem-total { margin-left: 0; width: 100%; text-align: right; }
 }
+/* ---- 记收益：不生收益的账户默认不列 + 口径面板两列勾选 ---- */
+.re-hidden-note {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    margin-top: 8px; padding: 8px 10px; border-radius: 10px;
+    background: var(--bg-input); font-size: 11.5px; color: var(--text-tertiary);
+}
+.re-hidden-note .link-btn { margin-top: 0; flex: none; }
+/* 两列勾选：记收益 / 算收益率。列宽要容得下表头不折行 */
+.scope-head {
+    display: grid; grid-template-columns: 28px 1fr 34px 46px 56px 72px;
+    gap: 8px; align-items: center;
+    font-size: 10.5px; color: var(--text-tertiary); padding: 0 10px 4px;
+}
+.scope-head span:nth-child(4), .scope-head span:nth-child(5) { text-align: center; white-space: nowrap; }
+.scope-row { display: grid; grid-template-columns: 28px 1fr 34px 46px 56px 72px; gap: 8px; align-items: center; }
+.scope-row .sr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-row input[type=checkbox] { justify-self: center; width: 18px; height: 18px; accent-color: var(--accent); }
+.sr-tag.ph { visibility: hidden; }
+.sr-tag { white-space: nowrap; }
+.sr-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switch-row { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 4px; font-size: 13.5px; cursor: pointer; }
+.switch-row input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--accent); flex: none; }
+.switch-row .sr-hint { display: block; font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+@media (max-width: 640px) {
+    .scope-head, .scope-row { grid-template-columns: 26px 1fr 24px 40px 52px 64px; gap: 5px; }
+    .sr-sub, .scope-head span:last-child { display: none; }
+}

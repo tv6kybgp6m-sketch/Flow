@@ -762,7 +762,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.34.5</div>
+                                    <div class="about-version">版本 1.34.6</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1164,6 +1164,10 @@
                         </div>
                     </div>
                     <div class="settings-sublabel">分类决定它算不算进收益率（稳健理财 / 长期投资才算），负债改资产会一并影响净资产口径。</div>
+                    <label class="switch-row">
+                        <input type="checkbox" id="acctEditEarns">
+                        <span>这个账户会有收益<span class="sr-hint">关掉后不会出现在「记收益」列表里；本月已录过的仍然能改</span></span>
+                    </label>
                     <label class="settings-label">图标</label>
                     <div class="icon-picker" id="acctEditIcons"></div>
                     <label class="settings-label">颜色</label>
@@ -1326,7 +1330,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.34.5').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.34.6').catch(() => {});
             });
         }
     </script>
