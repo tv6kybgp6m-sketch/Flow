@@ -315,7 +315,7 @@
                                 <i class="fa-solid fa-building-columns"></i> 账户
                             </button>
                             <button class="primary-btn" onclick="openBalanceModal()">
-                                <i class="fa-solid fa-plus"></i> 记余额
+                                <i class="fa-solid fa-plus"></i> 记月度账单
                             </button>
                         </div>
                     </div>
@@ -455,7 +455,7 @@
                                 <i class="fa-solid fa-filter"></i> 口径
                             </button>
                             <button class="primary-btn" onclick="openReturnModal()">
-                                <i class="fa-solid fa-plus"></i> 记收益
+                                <i class="fa-solid fa-plus"></i> 记月度账单
                             </button>
                         </div>
                     </div>
@@ -762,7 +762,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.34.6</div>
+                                    <div class="about-version">版本 1.35.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -969,87 +969,48 @@
             </div>
         </div>
 
-        <!-- Investment Return Entry Modal -->
-        <div class="modal-overlay hidden" id="returnModal">
+        <!-- Monthly Entry Modal：余额 + 收益 + 净入金，按钱包分节一次填完 -->
+        <div class="modal-overlay hidden" id="monthlyModal">
             <div class="modal balance-modal">
                 <div class="modal-header">
                     <div class="drill-title-wrap">
-                        <h2>记录投资收益</h2>
-                        <div class="cat-txn-sub" id="returnModalSub"></div>
+                        <h2>记月度账单</h2>
+                        <div class="cat-txn-sub" id="monthlyModalSub"></div>
                     </div>
-                    <button class="modal-close" onclick="closeReturnModal()"><i class="fa-solid fa-xmark"></i></button>
+                    <button class="modal-close" onclick="closeMonthlyModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="bal-entry-head">
                         <div class="form-group">
                             <label>成员</label>
-                            <select class="text-input" id="returnMemberSelect"></select>
+                            <select class="text-input" id="monthlyMemberSelect"></select>
                         </div>
                         <div class="form-group be-ym-group">
                             <label>归属月份</label>
                             <div class="ym-pair">
-                                <input type="text" class="text-input ym-year" id="returnInYear"
+                                <input type="text" class="text-input ym-year" id="monthlyInYear"
                                        inputmode="numeric" pattern="[0-9]*" maxlength="4"
                                        autocomplete="off" placeholder="年份">
-                                <select class="text-input" id="returnInMonth"></select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bal-entry-actions">
-                        <button class="secondary-btn" onclick="clearReturnInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
-                        <span class="ret-tip">只填市值变动；分红走流水；亏损填负数，留空表示不记</span>
-                    </div>
-                    <div id="returnEntryList" class="balance-entry-list"></div>
-                    <button class="add-account-inline" onclick="openAccountsModal()">
-                        <i class="fa-solid fa-plus"></i> 添加账户
-                    </button>
-                </div>
-                <div class="modal-footer">
-                    <button class="secondary-btn" onclick="closeReturnModal()">取消</button>
-                    <button class="primary-btn" onclick="saveReturns()"><i class="fa-solid fa-check"></i> 保存</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Balance Entry Modal -->
-        <div class="modal-overlay hidden" id="balanceModal">
-            <div class="modal balance-modal">
-                <div class="modal-header">
-                    <div class="drill-title-wrap">
-                        <h2>记录账户余额</h2>
-                        <div class="cat-txn-sub" id="balanceModalSub"></div>
-                    </div>
-                    <button class="modal-close" onclick="closeBalanceModal()"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div class="modal-body">
-                    <div class="bal-entry-head">
-                        <div class="form-group">
-                            <label>成员</label>
-                            <select class="text-input" id="balanceMemberSelect"></select>
-                        </div>
-                        <div class="form-group be-ym-group">
-                            <label>归属月份</label>
-                            <div class="ym-pair">
-                                <input type="text" class="text-input ym-year" id="balanceInYear"
-                                       inputmode="numeric" pattern="[0-9]*" maxlength="4"
-                                       autocomplete="off" placeholder="年份">
-                                <select class="text-input" id="balanceInMonth"></select>
+                                <select class="text-input" id="monthlyInMonth"></select>
                             </div>
                         </div>
                     </div>
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="copyLastMonthBalances()"><i class="fa-solid fa-copy"></i> 沿用上期</button>
-                        <button class="secondary-btn" onclick="clearBalanceInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
+                        <button class="secondary-btn" onclick="clearMonthlyInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
+                        <span class="ret-tip">余额填期末数；收益只填市值变动、亏损填负数；净入金点「＋」填</span>
                     </div>
-                    <div id="balanceEntryList" class="balance-entry-list"></div>
+                    <div id="monthlyEntryList" class="balance-entry-list"></div>
+                    <button class="add-account-inline" onclick="openAccountsModal()">
+                        <i class="fa-solid fa-plus"></i> 添加账户
+                    </button>
                 </div>
                 <div class="modal-footer">
-                    <button class="secondary-btn" onclick="closeBalanceModal()">取消</button>
-                    <button class="primary-btn" onclick="saveBalances()"><i class="fa-solid fa-check"></i> 保存</button>
+                    <button class="secondary-btn" onclick="closeMonthlyModal()">取消</button>
+                    <button class="primary-btn" onclick="saveMonthly()"><i class="fa-solid fa-check"></i> 保存</button>
                 </div>
             </div>
         </div>
-
         <!-- Account Management Modal -->
         <div class="modal-overlay hidden" id="accountsModal">
             <div class="modal balance-modal">
@@ -1163,10 +1124,13 @@
                             <select class="text-input" id="acctEditGroup"></select>
                         </div>
                     </div>
-                    <div class="settings-sublabel">分类决定它算不算进收益率（稳健理财 / 长期投资才算），负债改资产会一并影响净资产口径。</div>
+                    <label class="settings-label">所属钱包</label>
+                    <input type="text" class="text-input" id="acctEditWallet" list="walletChoices" placeholder="如：支付宝 / 微信 / 招商银行；留空 = 单独一组">
+                    <datalist id="walletChoices"></datalist>
+                    <div class="settings-sublabel">记余额和记收益时按钱包归到同一节里一起填；只是分组，不影响任何计算。分类决定它算不算进收益率（稳健理财 / 长期投资才算），负债改资产会一并影响净资产口径。</div>
                     <label class="switch-row">
                         <input type="checkbox" id="acctEditEarns">
-                        <span>这个账户会有收益<span class="sr-hint">关掉后不会出现在「记收益」列表里；本月已录过的仍然能改</span></span>
+                        <span>这个账户会有收益<span class="sr-hint">关掉后不会出现在记账单的收益那一列里；本月已录过的仍然能改</span></span>
                     </label>
                     <label class="settings-label">图标</label>
                     <div class="icon-picker" id="acctEditIcons"></div>
@@ -1330,7 +1294,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.34.6').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.35.0').catch(() => {});
             });
         }
     </script>

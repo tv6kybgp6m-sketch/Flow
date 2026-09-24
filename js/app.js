@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.34.6';
+const APP_VERSION = '1.35.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6369,13 +6369,52 @@ function renderBalanceBreakdown() {
         const raw = map[a.id];
         const amount = raw === undefined ? null
             : (metric === 'net' && a.kind === 'liability' ? -raw : raw);
-        return { a, amount, signed: amount === null ? -1 : Math.abs(amount) };
+        const shown = amount === null ? 0
+            : (metric === 'net' && a.kind === 'liability' ? -Math.abs(amount) : Math.abs(amount));
+        return { a, amount, shown, signed: amount === null ? -1 : Math.abs(amount) };
     });
     rows.sort((x, y) => y.signed - x.signed);
     const total = rows.reduce((sum, r) => sum + (r.signed > 0 ? r.signed : 0), 0);
     const top = rows.length && rows[0].signed > 0 ? rows[0].signed : 1;
+    rows.forEach((r, i) => { r.rank = i + 1; });
 
-    container.innerHTML = rows.map((r, i) => {
+    // 按钱包折叠：一个支付宝下有活期/基金/定期/花呗，平铺着看很散，收成卡片先看总数
+    const groups = [], byName = {};
+    rows.forEach(r => {
+        const w = accountWallet(r.a) || '未分组';
+        if (!byName[w]) { byName[w] = { name: w, rows: [] }; groups.push(byName[w]); }
+        byName[w].rows.push(r);
+    });
+    const sumOf = g => Math.abs(g.rows.reduce((t, r) => t + r.shown, 0));
+    if (groups.length > 1) groups.sort((x, y) => sumOf(y) - sumOf(x));
+    const flat = rows.length <= 1 || groups.length <= 1;
+    container.innerHTML = (flat ? [{ name: '', rows }] : groups).map(g => {
+        const open = flat || g.rows.length === 1 || balOpenWallets.has(g.name);
+        const card = g.rows.map(r => breakdownRowHTML(r, total, top, metric)).join('');
+        if (flat) return card;
+        const net = g.rows.reduce((t, r) => t + r.shown, 0);
+        return `<div class="bal-wallet${open ? ' open' : ''}">
+            <div class="bw-head" data-bal-wallet="${_esc(g.name)}">
+                <span class="bw-name">${_esc(g.name)}<em>${g.rows.length} 项</em></span>
+                <span class="bw-net">${formatCurrency(net)}</span>
+                <i class="fa-solid ${open ? 'fa-chevron-up' : 'fa-chevron-down'}"></i>
+            </div>
+            ${open ? `<div class="bw-body">${card}</div>` : ''}
+        </div>`;
+    }).join('');
+    container.querySelectorAll('[data-bal-wallet]').forEach(el =>
+        el.addEventListener('click', () => toggleBalWallet(el.dataset.balWallet)));
+}
+
+// 展开状态只活在本次会话里：折叠是为了"看一眼总数"，不值得存到账本里
+const balOpenWallets = new Set();
+function toggleBalWallet(name) {
+    if (balOpenWallets.has(name)) balOpenWallets.delete(name); else balOpenWallets.add(name);
+    renderBalanceBreakdown();
+}
+
+function breakdownRowHTML(r, total, top, metric) {
+    {
         const a = r.a;
         const color = a.color || '#8e8e8e';
         const has = r.amount !== null;
@@ -6388,7 +6427,7 @@ function renderBalanceBreakdown() {
                 </div>
                 <div class="breakdown-main">
                     <div class="breakdown-head">
-                        <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${i + 1}</span>` : ''}</span>
+                        <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${r.rank}</span>` : ''}</span>
                         <span class="breakdown-amount">${has ? `${sign}${formatCurrency(Math.abs(r.amount))}<em>${pct.toFixed(1)}%</em>` : '<span class="bd-no">未记录</span>'}</span>
                     </div>
                     <div class="breakdown-bar"><div class="breakdown-fill" style="width:${has ? Math.max(3, (r.signed / top) * 100) : 0}%;background:${color}"></div></div>
@@ -6396,7 +6435,7 @@ function renderBalanceBreakdown() {
                 <span class="bal-group-tag">${a.group || ''}</span>
                 <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
             </div>`;
-    }).join('');
+    }
 }
 
 // ---------------- 账户历史弹窗 ----------------
@@ -6497,7 +6536,7 @@ function editReturnRecord(id) {
     if (!r) { showToast('这条记录已经不在了', 'error'); return; }
     closeAccountHistoryModal();
     openReturnModal(r.month);
-    focusEntryRow('returnMemberSelect', r.member, 'returnEntryList', r.accountId);
+    focusMonthlyRow(r.member, r.accountId, 'ret');
 }
 
 function editBalanceRecord(id) {
@@ -6505,22 +6544,23 @@ function editBalanceRecord(id) {
     if (!b) { showToast('这条记录已经不在了', 'error'); return; }
     closeAccountHistoryModal();
     openBalanceModal(b.month);
-    focusEntryRow('balanceMemberSelect', b.member, 'balanceEntryList', b.accountId);
+    focusMonthlyRow(b.member, b.accountId, 'bal');
 }
 
-function focusEntryRow(memberSel, member, listId, accountId) {
-    const ms = document.getElementById(memberSel);
+// 打开合并弹窗后，滚到那一行、聚焦要改的那一格
+function focusMonthlyRow(member, accountId, which) {
+    const ms = document.getElementById('monthlyMemberSelect');
     if (ms && member && ms.value !== member && Array.from(ms.options || []).some(o => o.value === member)) {
         ms.value = member;
         ms.dispatchEvent(new Event('change', { bubbles: true }));
     }
     setTimeout(() => {
-        const inp = document.querySelector('#' + listId + ' [data-account="' + accountId + '"]');
-        const row = inp && inp.closest ? inp.closest('.bal-entry-row') : null;
+        const row = document.querySelector(`#monthlyEntryList [data-mw-account="${accountId}"]`);
         if (!row) return;
+        const inp = row.querySelector(which === 'ret' ? '[data-ret]' : '[data-bal]');
         row.classList.add('be-editing');
         row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        if (inp.select) inp.select();
+        if (inp && inp.select) inp.select();
         setTimeout(() => row.classList.remove('be-editing'), 5000);
     }, 150);
 }
@@ -6654,6 +6694,15 @@ function openAccountEdit(accountId) {
     paintAcctEditGroups(a.kind, a.group);
     const er = document.getElementById('acctEditEarns');
     if (er) { er.checked = acctEditDraft.earnsReturn; }
+    const wl = document.getElementById('acctEditWallet');
+    if (wl) {
+        wl.value = typeof a.wallet === 'string' ? a.wallet : (guessWalletFromName(a.name) || '');
+        const dl = document.getElementById('walletChoices');
+        if (dl) {
+            const seen = [...new Set(state.accounts.map(accountWallet).filter(Boolean))];
+            dl.innerHTML = seen.map(w => `<option value="${_esc(w)}">`).join('');
+        }
+    }
     renderAcctEditPickers();
     const modal = document.getElementById('accountEditModal');
     modal.classList.remove('hidden');
@@ -6691,10 +6740,12 @@ function saveAccountEdit() {
     if (state.accounts.some(x => x.id !== a.id && String(x.name).trim() === name)) {
         showToast(`已经有叫「${name}」的账户了`, 'error'); return;
     }
+    const walletEl = document.getElementById('acctEditWallet');
+    const wallet = walletEl ? String(walletEl.value || '').trim() : '';
     const kind = document.getElementById('acctEditKind').value === 'liability' ? 'liability' : 'asset';
     let group = document.getElementById('acctEditGroup').value;
     if (!groupsForKind(kind).includes(group)) group = groupsForKind(kind)[0];
-    Object.assign(a, { name, kind, group, icon: acctEditDraft.icon, color: acctEditDraft.color,
+    Object.assign(a, { name, kind, group, wallet, icon: acctEditDraft.icon, color: acctEditDraft.color,
         earnsReturn: kind === 'asset' ? !!acctEditDraft.earnsReturn : undefined, updatedAt: Date.now() });
     if (kind !== 'asset' && a.earnsReturn === undefined) delete a.earnsReturn;
     ensureAccountOrder();
@@ -6922,55 +6973,7 @@ function bindModalMonth(prefix, onChange) {
 }
 
 // ---------------- 记余额弹窗 ----------------
-function openBalanceModal(month) {
-    const info = balancePeriodInfo();
-    const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    paintModalMonth('balance', want);
-    const ms = document.getElementById('balanceMemberSelect');
-    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
-    renderBalanceEntry();
-    document.getElementById('balanceModal').classList.remove('hidden');
-    raiseOverlay('balanceModal');
-}
-
-function closeBalanceModal() {
-    document.getElementById('balanceModal').classList.add('hidden');
-}
-
-function renderBalanceEntry() {
-    const month = getModalMonth('balance');
-    const ms = document.getElementById('balanceMemberSelect');
-    if (ms) {
-        const want = ms.value || state.balanceMembers[0] || '本人';
-        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
-    }
-    const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
-    document.getElementById('balanceModalSub').textContent = month ? `${member} · ${month.replace('-', '年')}月底各账户余额` : '请先选择月份';
-    const existing = balancesAtMonth(month, member);
-    const list = document.getElementById('balanceEntryList');
-    if (!state.accounts.length) {
-        list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
-        return;
-    }
-    ensureAccountOrder();
-    const rowHTML = a => `
-        <div class="bal-entry-row">
-            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
-            <div class="be-input">
-                <span class="currency-symbol">${state.settings.currency}</span>
-                <input type="number" step="0.01" min="0" class="text-input be-field" data-account="${a.id}"
-                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
-            </div>
-        </div>`;
-    const beSections = [['asset', '资产'], ['liability', '负债']];
-    list.innerHTML = beSections.map(([kind, label]) => {
-        const rows = accountsSortedByKind(kind);
-        if (!rows.length) return '';
-        return `<div class="be-section-title ${kind}">${label}账户（${rows.length}）</div>` + rows.map(rowHTML).join('');
-    }).join('');
-}
-
+// 月份工具：'YYYY-MM' 前进 / 后退一个月（余额是月末快照，缺月不能拿上期顶替）
 function previousMonthOf(month) {
     if (!month) return null;
     const [y, m] = month.split('-').map(Number);
@@ -6983,55 +6986,425 @@ function nextMonthOf(month) {
     return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
-function copyLastMonthBalances() {
-    const month = getModalMonth('balance');
-    const prev = previousMonthOf(month);
-    if (!prev) { showToast('没有更早的记录可沿用', 'error'); return; }
-    const member = (document.getElementById('balanceMemberSelect') || {}).value || state.balanceMembers[0] || '本人';
-    const src = carriedBalances(prev, member);
-    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => {
-        const v = src[inp.dataset.account];
-        if (v !== undefined && !inp.value) inp.value = v;
+// ==================== 记月度账单：余额 + 收益 + 净入金，按钱包分节 ====================
+// 一个支付宝里同时有活期、基金、定期、花呗；以前要在「记余额」和「记收益」两个弹窗里
+// 来回填，同一个账户填两遍。这里合成一屏：一行一个账户，横向把它的数一次填完。
+// 「钱包」只是录入和显示时的分组，不是记账实体 —— 余额、收益仍然一条一个账户，
+// 所以收益率、四笔钱、净资产桥的计算完全不变，也不可能重复计算。
+
+const WALLET_BRANDS = ['支付宝', '微信', '云闪付', '京东', '美团', '抖音', '数字人民币'];
+const WALLET_BANKS = ['招商', '工商', '建设', '农业', '交通', '民生', '兴业', '浦发', '中信', '平安',
+    '光大', '华夏', '邮储', '邮政', '农村商业', '农商', '农村信用', '宁波', '杭州', '江苏', '北京',
+    '上海', '广发', '浙商', '恒丰', '渤海', '汇丰', '花旗', '东亚', '微众', '网商'];
+
+// 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
+function guessWalletFromName(name) {
+    const n = String(name || '');
+    for (const b of WALLET_BRANDS) if (n.indexOf(b) >= 0) return b;
+    if (/花呗|借呗|余额宝/.test(n)) return '支付宝';
+    if (/白条|金条/.test(n)) return '京东';
+    for (const k of WALLET_BANKS) {
+        if (n.indexOf(k) >= 0 && /银行|储蓄卡|借记卡|信用卡/.test(n)) return k + '银行';
+    }
+    if (/储蓄卡|借记卡/.test(n)) return '银行';
+    if (/信用卡/.test(n)) return '信用卡';
+    return '';
+}
+
+// 用户明确设过的（含设成空串 = 不分组）优先；没设过才猜
+function accountWallet(a) {
+    if (!a) return '';
+    if (typeof a.wallet === 'string') return a.wallet.trim();
+    return guessWalletFromName(a.name);
+}
+
+// 按钱包把账户分节：先资产后负债，同一钱包的两类放一节里（负债在行上标出来）
+function walletGroups() {
+    const order = [], map = {};
+    const put = (a) => {
+        const name = accountWallet(a) || '未分组';
+        if (!map[name]) { map[name] = { name, rows: [] }; order.push(name); }
+        map[name].rows.push(a);
+    };
+    accountsSortedByKind('asset').forEach(put);
+    accountsSortedByKind('liability').forEach(put);
+    // 「未分组」永远排最后，别把真正有钱包的挤到后面
+    const at = order.indexOf('未分组');
+    if (at >= 0 && at !== order.length - 1) { order.splice(at, 1); order.push('未分组'); }
+    return order.map(n => map[n]);
+}
+
+let monthlyFocus = '';                       // 'bal' | 'ret'：从哪个入口进来，决定滚到哪
+const monthlyFlowOpen = new Set();           // 本次打开里展开过「净入金」的账户
+// 展开「＋入金」、切换"显示收益列"都会重画整张表；不先把没保存的输入值收下来，
+// 用户刚填的数就会被已保存的旧值冲掉（实测踩过）。
+let monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
+let monthlyDirty = false;                    // 只有真敲过字才需要收草稿，否则会把上一次打开的旧 DOM 又捡回来
+
+function captureMonthlyInputs() {
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    const grab = (sel, key, attr) => list.querySelectorAll(sel).forEach(el => { monthlyInput[key][el.dataset[attr]] = el.value; });
+    grab('[data-bal]', 'bal', 'bal');
+    grab('[data-ret]', 'ret', 'ret');
+    grab('[data-flow-in]', 'flow', 'flowIn');
+    grab('[data-wallet-total]', 'wt', 'walletTotal');
+}
+
+function monthlyVal(key, accountId, saved) {
+    const typed = monthlyInput[key][accountId];
+    if (typed === undefined) return saved === undefined ? '' : saved;
+    return String(typed).trim() === '' ? '' : typed;
+}
+
+function monthlyDefaultMonth() {
+    const ms = balanceMonths();
+    if (ms.length) return ms[ms.length - 1];
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthlyMember() {
+    const ms = document.getElementById('monthlyMemberSelect');
+    return (ms && ms.value) || state.balanceMembers[0] || '本人';
+}
+
+function openMonthlyModal(month, focus) {
+    const modal = document.getElementById('monthlyModal');
+    if (!modal) return;
+    monthlyFocus = focus || '';
+    monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
+    monthlyFlowOpen.clear();
+    monthlyDirty = false;
+    paintModalMonth('monthly', month || monthlyDefaultMonth());
+    const ms = document.getElementById('monthlyMemberSelect');
+    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
+    modal.classList.remove('hidden');
+    raiseOverlay('monthlyModal');
+    renderMonthlyEntry();
+    if (monthlyFocus === 'ret') {
+        const first = document.querySelector('#monthlyEntryList [data-ret]');
+        if (first) setTimeout(() => { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus(); }, 120);
+    }
+}
+
+function closeMonthlyModal() {
+    const modal = document.getElementById('monthlyModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function monthlyRowHTML(a, balV, retV, flowV, earns, showFlow) {
+    const isLiab = a.kind === 'liability';
+    const rate = earns ? `<span class="be-rate" data-rate-for="${a.id}"></span>` : '';
+    return `
+        <div class="bal-entry-row mw-row${earns ? ' has-ret' : ''}${isLiab ? ' is-liab' : ''}" data-mw-account="${a.id}">
+            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
+            <div class="be-name">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || (isLiab ? '负债' : '资产'))}</span></div>
+            <div class="be-input">
+                <span class="currency-symbol">${state.settings.currency}</span>
+                <input type="number" step="0.01" min="0" class="text-input be-field" data-bal="${a.id}"
+                       value="${balV === undefined || balV === null || balV === '' ? '' : balV}" placeholder="${isLiab ? '欠多少' : '期末余额'}">
+            </div>
+            ${earns ? `<div class="be-input">
+                <span class="currency-symbol">${state.settings.currency}</span>
+                <input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
+                       value="${retV === undefined || retV === null || retV === '' ? '' : retV}" placeholder="收益">${rate}
+            </div>` : '<div class="be-input mw-na">—</div>'}
+            ${earns ? `<div class="be-input mw-flow${showFlow ? '' : ' hidden'}">
+                <input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
+                       value="${flowV === undefined || flowV === null || flowV === '' ? '' : flowV}" placeholder="净入金">
+            </div>
+            <button class="mw-flow-btn${showFlow ? ' on' : ''}" type="button" data-flow="${a.id}"
+                title="本月从外部转入(+)或转出(−)；账户之间互转不用填">${showFlow ? '入金' : '＋'}</button>`
+              : '<div class="be-input mw-flow hidden"></div><span class="mw-flow-btn ph"></span>'}
+        </div>`;
+}
+
+function renderMonthlyEntry() {
+    if (monthlyDirty) captureMonthlyInputs();
+    const month = getModalMonth('monthly');
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    const ms = document.getElementById('monthlyMemberSelect');
+    if (ms) {
+        const want = ms.value || state.balanceMembers[0] || '本人';
+        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
+    }
+    const member = monthlyMember();
+    const sub = document.getElementById('monthlyModalSub');
+    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月：余额和收益一次填完` : '请先选择月份';
+    if (!state.accounts.length) {
+        list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
+        return;
+    }
+    if (!month) { list.innerHTML = ''; return; }
+    ensureAccountOrder();
+    const balAt = balancesAtMonth(month, member);
+    const retAt = returnsAtMonth(month, member);
+    const flowAt = {};
+    state.returns.forEach(r => {
+        if (r.month !== month) return;
+        if (member !== 'all' && r.member !== member) return;
+        if (r.flow === undefined || r.flow === null || r.flow === '') return;
+        flowAt[r.accountId] = r.flow;
     });
-    showToast(`已沿用 ${prev.replace('-', '年')}月的余额`, 'success');
+    const showAll = !!state.returnEntryShowAll;
+    const earnsSet = new Set(returnEntryAccounts(month, member).map(a => a.id));
+    const flowOf = id => flowAt[id] === undefined ? '' : flowAt[id];
+    const groups = walletGroups();
+    const head = `<div class="mw-head">
+            <span></span><span>账户</span><span>期末余额</span><span>本月收益</span>
+            <span class="mw-h-flow">净入金</span><span></span>
+        </div>`;
+    list.innerHTML = head + groups.map(g => {
+        const rows = g.rows.map(a => {
+            const earns = showAll || earnsSet.has(a.id)
+                || String(monthlyInput.ret[a.id] || '').trim() !== '';
+            return monthlyRowHTML(a, monthlyVal('bal', a.id, balAt[a.id]),
+                earns ? monthlyVal('ret', a.id, retAt[a.id]) : undefined,
+                earns ? monthlyVal('flow', a.id, flowAt[a.id]) : undefined,
+                earns, monthlyFlowOpen.has(a.id) || (flowAt[a.id] !== undefined && monthlyInput.flow[a.id] === undefined));
+        }).join('');
+        const note = g.name === '未分组'
+            ? `<div class="mw-note">这些账户没填「所属钱包」，先集中放这里。在编辑账户里填一次（如支付宝、微信、招商银行），以后就按钱包归到一起填。</div>`
+            : '';
+        return `<div class="mw-group" data-wallet="${_esc(g.name)}">
+            <div class="mw-group-head">
+                <span class="mw-name">${_esc(g.name)}</span>
+                <span class="mw-sum">小计 <b data-wsum>—</b></span>
+                <span class="mw-check"><input type="number" step="0.01" class="text-input mw-total"
+                    placeholder="对账单总额" data-wallet-total="${_esc(g.name)}"
+                    value="${_esc(monthlyInput.wt[g.name] || '')}"><span class="mw-diff" data-wdiff></span></span>
+            </div>
+            ${rows}${note}
+        </div>`;
+    }).join('') + (groups.some(g => g.rows.some(a => !accountEarnsReturn(a)))
+        ? `<div class="re-hidden-note">
+            <span>${showAll ? '已列出全部账户' : '收益列只给"会生收益"的账户；现金、房产这些不填收益'}</span>
+            <button class="link-btn" type="button" id="reShowAll">${showAll ? '只看会生收益的' : '显示收益列'}</button>
+        </div>` : '');
+    bindMonthlyEntry();
 }
 
-function clearBalanceInputs() {
-    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => { inp.value = ''; });
+function bindMonthlyEntry() {
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp =>
+        inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
+    list.querySelectorAll('[data-flow]').forEach(btn => btn.addEventListener('click', () => {
+        const id = btn.dataset.flow;
+        if (monthlyFlowOpen.has(id)) monthlyFlowOpen.delete(id); else monthlyFlowOpen.add(id);
+        captureMonthlyInputs();
+        monthlyDirty = true;
+        renderMonthlyEntry();
+        const inp = list.querySelector(`[data-flow-in="${id}"]`);
+        if (inp) inp.focus();
+    }));
+    list.querySelectorAll('[data-wallet-total]').forEach(inp =>
+        inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
+    const toggle = document.getElementById('reShowAll');
+    if (toggle) toggle.addEventListener('click', () => {
+        state.returnEntryShowAll = !state.returnEntryShowAll;
+        captureMonthlyInputs();
+        monthlyDirty = true;
+        renderMonthlyEntry();
+    });
+    updateMonthlyDerived();
 }
 
-function saveBalances() {
-    const month = getModalMonth('balance');
+// 小计、差额、以及每行的实时收益率角标 —— 全部拿"还没保存的输入值"算
+function monthlyDraftStats(month, member) {
+    const list = document.getElementById('monthlyEntryList');
+    const draft = {};
+    if (!list) return draft;
+    list.querySelectorAll('[data-ret]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const v = parseFloat(raw);
+        if (!isFinite(v)) return;
+        const id = inp.dataset.ret;
+        draft[id] = draft[id] || {};
+        draft[id].profit = v;
+    });
+    list.querySelectorAll('[data-flow-in]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        const id = inp.dataset.flowIn;
+        draft[id] = draft[id] || {};
+        draft[id].flow = raw === '' ? '' : (parseFloat(raw) || 0);
+    });
+    list.querySelectorAll('[data-bal]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const v = parseFloat(raw);
+        if (!isFinite(v)) return;
+        const id = inp.dataset.bal;
+        draft[id] = draft[id] || {};
+        draft[id].balance = v;
+    });
+    return draft;
+}
+
+function updateMonthlyDerived() {
+    const month = getModalMonth('monthly');
+    if (!month) return;
+    const member = monthlyMember();
+    const list = document.getElementById('monthlyEntryList');
+    const draft = monthlyDraftStats(month, member);
+    // 1) 每行的收益率角标
+    Object.keys(draft).forEach(id => {
+        const badge = list.querySelector(`[data-rate-for="${id}"]`);
+        if (!badge) return;
+        const st = portfolioMonthStats(month, [id], draft[id] ? { [id]: draft[id] } : null, member);
+        // 算不出率时必须说清是"本金未知"，不能干脆不显示 —— 那是最容易让人以为没收益的错觉
+        const noRate = st.rate === null
+            ? ((st.unknown && st.unknown.length) || st.reason === 'no-capital' ? '本金未知' : '')
+            : pctText(st.rate);
+        badge.textContent = noRate;
+        badge.className = 'be-rate' + (st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : '')));
+    });
+    // 2) 每个钱包的小计与对账差额
+    list.querySelectorAll('.mw-group').forEach(g => {
+        let sum = 0, filled = 0;
+        g.querySelectorAll('[data-bal]').forEach(inp => {
+            const raw = String(inp.value).trim();
+            if (raw === '') return;
+            const v = parseFloat(raw);
+            if (!isFinite(v)) return;
+            const acct = accountById(inp.dataset.bal);
+            sum += (acct && acct.kind === 'liability') ? -v : v;
+            filled++;
+        });
+        const sumEl = g.querySelector('[data-wsum]');
+        if (sumEl) sumEl.textContent = filled ? formatCurrency(Math.round(sum * 100) / 100) : '—';
+        const totalEl = g.querySelector('[data-wallet-total]');
+        const diffEl = g.querySelector('[data-wdiff]');
+        if (!totalEl || !diffEl) return;
+        const tRaw = String(totalEl.value).trim();
+        if (tRaw === '' || !filled) { diffEl.textContent = ''; diffEl.className = 'mw-diff'; return; }
+        const t = parseFloat(tRaw);
+        if (!isFinite(t)) { diffEl.textContent = ''; return; }
+        const diff = Math.round((sum - t) * 100) / 100;
+        if (diff === 0) { diffEl.textContent = '对上了'; diffEl.className = 'mw-diff ok'; }
+        else {
+            diffEl.textContent = `差 ${formatCurrency(diff)}${Math.abs(diff) >= 1 ? '，是不是漏了一项' : ''}`;
+            diffEl.className = 'mw-diff warn';
+        }
+    });
+}
+
+function clearMonthlyInputs() {
+    captureMonthlyInputs();
+    monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
+    document.querySelectorAll('#monthlyEntryList input').forEach(i => {
+        if (i.dataset.walletTotal !== undefined || i.dataset.bal !== undefined
+            || i.dataset.ret !== undefined || i.dataset.flowIn !== undefined) i.value = '';
+    });
+    updateMonthlyDerived();
+}
+
+function copyLastMonthBalances() {
+    const month = getModalMonth('monthly');
+    if (!month) { showToast('请先选月份', 'error'); return; }
+    const prev = previousMonthOf(month);
+    if (!prev) { showToast('没有上个月的记录', 'info'); return; }
+    const member = monthlyMember();
+    const prevMap = balancesAtMonth(prev, member);
+    let filled = 0;
+    document.querySelectorAll('#monthlyEntryList [data-bal]').forEach(inp => {
+        if (String(inp.value).trim() !== '') return;
+        const v = prevMap[inp.dataset.bal];
+        if (v === undefined) return;
+        inp.value = v; filled++;
+    });
+    if (!filled) { showToast('上个月也没有记余额', 'info'); return; }
+    monthlyDirty = true;
+    updateMonthlyDerived();
+    showToast(`已带入 ${filled} 个账户的上期余额，改成这个月的数就行`, 'success');
+}
+
+function saveMonthly() {
+    const month = getModalMonth('monthly');
     if (!month) { showToast('请选择月份', 'error'); return; }
-    const member = (document.getElementById('balanceMemberSelect') || {}).value || state.balanceMembers[0] || '本人';
-    let saved = 0;
-    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => {
-        const raw = inp.value.trim();
+    const member = monthlyMember();
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    let savedBal = 0, savedRet = 0;
+    // 1) 余额：一条一个「成员+账户+月份」，重记就是覆盖
+    list.querySelectorAll('[data-bal]').forEach(inp => {
+        const raw = String(inp.value).trim();
         if (raw === '') return;
         const amount = parseFloat(raw);
         if (!isFinite(amount) || amount < 0) return;
-        const accountId = inp.dataset.account;
+        const accountId = inp.dataset.bal;
         const id = `${member}__${accountId}__${month}`;
         const existing = state.balances.find(b => b.id === id);
         if (existing) {
+            if (existing.amount === amount) return;
             existing.amount = amount;
             existing.updatedAt = Date.now();
         } else {
             state.balances.push({ id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
         }
-        saved += 1;
+        savedBal++;
     });
-    if (!saved) { showToast('没有需要保存的金额', 'error'); return; }
+    // 2) 收益 + 净入金
+    list.querySelectorAll('[data-ret]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const amount = parseFloat(raw);
+        if (!isFinite(amount)) return;
+        const accountId = inp.dataset.ret;
+        const id = _rebalanceId(member, accountId, month);
+        const flowEl = list.querySelector(`[data-flow-in="${accountId}"]`);
+        const flowRaw = flowEl ? String(flowEl.value).trim() : '';
+        const flow = flowRaw === '' ? null : (parseFloat(flowRaw) || 0);
+        const existing = state.returns.find(r => r.id === id);
+        if (existing) {
+            const sameAmount = existing.amount === amount;
+            const sameFlow = (existing.flow === null || existing.flow === undefined)
+                ? flow === null : Number(existing.flow) === flow;
+            if (sameAmount && sameFlow) return;
+            existing.amount = amount;
+            if (flow !== null) existing.flow = flow; else delete existing.flow;
+            existing.updatedAt = Date.now();
+        } else {
+            const rec = { id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() };
+            if (flow !== null) rec.flow = flow;
+            state.returns.push(rec);
+        }
+        savedRet++;
+    });
+    if (!savedBal && !savedRet) { showToast('没有需要保存的数', 'error'); return; }
     saveState();
-    closeBalanceModal();
-    state.balancePeriod = 'month';
+    closeMonthlyModal();
     const [y, m] = month.split('-').map(Number);
-    state.balanceYear = y;
-    state.balanceMonth = m;
-    document.querySelectorAll('[data-bal-period]').forEach(b => b.classList.toggle('active', b.dataset.balPeriod === 'month'));
+    state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = m;
+    state.returnPeriod = 'month'; state.returnYear = y; state.returnMonth = m; state.returnGran = null;
+    document.querySelectorAll('[data-bal-period]').forEach(b =>
+        b.classList.toggle('active', b.dataset.balPeriod === 'month'));
+    document.querySelectorAll('[data-ret-period]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retPeriod === 'month'));
     renderBalance();
-    showToast(`已保存 ${saved} 个账户的余额`, 'success');
+    renderReturns();
+    updateSidebarSummary();
+    const parts = [];
+    if (savedBal) parts.push(`${savedBal} 个账户的余额`);
+    if (savedRet) parts.push(`${savedRet} 笔收益`);
+    showToast('已保存' + parts.join('和'), 'success');
 }
+
+// ---- 老入口全部指向同一个弹窗（结账清单、账户历史里的「修改」都还在调它们）----
+function openBalanceModal(month) { return openMonthlyModal(month, 'bal'); }
+function closeBalanceModal() { return closeMonthlyModal(); }
+function renderBalanceEntry() { return renderMonthlyEntry(); }
+function saveBalances() { return saveMonthly(); }
+function clearBalanceInputs() { return clearMonthlyInputs(); }
+function openReturnModal(month) { return openMonthlyModal(month, 'ret'); }
+function closeReturnModal() { return closeMonthlyModal(); }
+function renderReturnEntry() { return renderMonthlyEntry(); }
+function saveReturns() { return saveMonthly(); }
+function clearReturnInputs() { return clearMonthlyInputs(); }
+function bindReturnRatePreview() { return updateMonthlyDerived(); }
 
 // ---------------- 账户管理弹窗 ----------------
 function openAccountsModal() {
@@ -7156,8 +7529,8 @@ function refreshAccountLists() {
     if (state.currentView === 'balance') renderBalance();
     if (state.currentView === 'returns') renderReturns();
     // 记收益弹窗开着时，新增/删除账户要立刻反映到列表里
-    const retModal = document.getElementById('returnModal');
-    if (retModal && !retModal.classList.contains('hidden')) renderReturnEntry();
+    const monthly = document.getElementById('monthlyModal');
+    if (monthly && !monthly.classList.contains('hidden')) renderMonthlyEntry();
 }
 
 function initBalanceListeners() {
@@ -7187,9 +7560,9 @@ function initBalanceListeners() {
         state.balanceMonth = parseInt(e.target.value);
         renderBalance();
     });
-    bindModalMonth('balance', renderBalanceEntry);
-    const balMemberSel = document.getElementById('balanceMemberSelect');
-    if (balMemberSel) balMemberSel.addEventListener('change', renderBalanceEntry);
+    bindModalMonth('monthly', renderMonthlyEntry);
+    const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
+    if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', renderMonthlyEntry);
     document.getElementById('newAccountKind').addEventListener('change', () => {
         const kind = document.getElementById('newAccountKind').value;
         document.getElementById('newAccountGroup').innerHTML =
@@ -8069,6 +8442,11 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
             } else {
                 flowOf[id] = Number(d.flow) || 0; flowKnownOf[id] = true;
             }
+        }
+        // 「记月度账单」里余额和收益是同一屏填的，草稿也得能覆盖期末市值，
+        // 否则刚改完余额、角标还按老余额算率，看着就是错的。
+        if ('balance' in d && d.balance !== '' && d.balance !== null && d.balance !== undefined) {
+            curMap[id] = Number(d.balance) || 0;
         }
     });
 
@@ -9175,156 +9553,6 @@ function deleteReturnSnapshot(id) {
 }
 
 // ---------------- 记收益弹窗 ----------------
-function openReturnModal(month) {
-    const info = returnPeriodInfo();
-    const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    paintModalMonth('return', want);
-    const ms = document.getElementById('returnMemberSelect');
-    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
-    renderReturnEntry();
-    const modal = document.getElementById('returnModal');
-    if (modal) { modal.classList.remove('hidden'); raiseOverlay('returnModal'); }
-}
-
-function closeReturnModal() {
-    const modal = document.getElementById('returnModal');
-    if (modal) modal.classList.add('hidden');
-}
-
-function renderReturnEntry() {
-    const month = getModalMonth('return');
-    if (!month) return;
-    const ms = document.getElementById('returnMemberSelect');
-    if (ms) {
-        const want = ms.value || state.balanceMembers[0] || '本人';
-        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
-    }
-    const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
-    const sub = document.getElementById('returnModalSub');
-    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月各账户收益` : '请先选择月份';
-    const list = document.getElementById('returnEntryList');
-    if (!list) return;
-    const accounts = returnEntryAccounts(month, member);
-    const hiddenOnes = returnCandidateAccounts().filter(a => !accounts.includes(a));
-    if (!accounts.length) {
-        list.innerHTML = '<div class="breakdown-empty">还没有资产账户，先到「资产负债」里添加</div>';
-        return;
-    }
-    const existing = returnsAtMonth(month, member);
-    const invIds = investmentAccountIds();
-    // 净入金按「成员+账户+月份」取已有值，供账户级收益率使用
-    const flowOf = (accId) => {
-        const hit = state.returns.find(r => r.accountId === accId && r.month === month
-            && (member === 'all' ? true : r.member === member)
-            && r.flow !== undefined && r.flow !== null && r.flow !== '');
-        return hit ? hit.flow : '';
-    };
-    list.innerHTML = accounts.map(a => {
-        const needFlow = invIds.includes(a.id) || existing[a.id] !== undefined;
-        const st = needFlow ? portfolioMonthStats(month, [a.id], null, member) : null;
-        const badge = st ? `<span class="be-rate${st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : ''))}" data-account="${a.id}">${st.rate === null ? '本金未知' : pctText(st.rate)}</span>` : '';
-        return `
-        <div class="bal-entry-row ${needFlow ? 'has-flow' : ''}">
-            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${_esc(a.name)}${badge}<span class="be-kind asset">${_esc(a.group || '资产')}</span></div>
-            <div class="be-input">
-                <span class="currency-symbol">${state.settings.currency}</span>
-                <input type="number" step="0.01" class="text-input be-field" data-account="${a.id}"
-                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="收益">
-            </div>
-            ${needFlow ? `<div class="be-input be-flow-input" title="本月从外部转入(+)或转出(−)；账户之间互转不用填；留空表示未录">
-                <span class="be-flow-label">净入金</span>
-                <input type="number" step="0.01" class="text-input be-flow" data-account="${a.id}"
-                       value="${flowOf(a.id)}" placeholder="0">
-            </div>` : ''}
-        </div>`;
-    }).join('') + (hiddenOnes.length ? `
-        <div class="re-hidden-note">
-            <span>另有 ${hiddenOnes.length} 个账户不生收益、没列出来：${_esc(hiddenOnes.map(a => a.name).join('、'))}</span>
-            <button class="link-btn" type="button" id="reShowAll">显示全部</button>
-        </div>` : (state.returnEntryShowAll ? `
-        <div class="re-hidden-note"><button class="link-btn" type="button" id="reShowAll">只看会生收益的</button></div>` : ''));
-    const toggle = document.getElementById('reShowAll');
-    if (toggle) toggle.addEventListener('click', () => {
-        state.returnEntryShowAll = !state.returnEntryShowAll;
-        renderReturnEntry();
-    });
-    bindReturnRatePreview();
-}
-
-// 边填边算：把弹窗里的未保存数值当草稿喂给收益率算法，实时更新那枚角标
-function bindReturnRatePreview() {
-    const list = document.getElementById('returnEntryList');
-    if (!list || list.dataset.previewBound === '1') return;
-    list.dataset.previewBound = '1';
-    list.addEventListener('input', () => {
-        const ms = document.getElementById('returnMemberSelect');
-        const month = getModalMonth('return');
-        const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
-        if (!month) return;
-        list.querySelectorAll('.be-rate').forEach(badge => {
-            const accId = badge.dataset.account;
-            const profitEl = list.querySelector(`.be-field[data-account="${CSS.escape(accId)}"]`);
-            const flowEl = list.querySelector(`.be-flow[data-account="${CSS.escape(accId)}"]`);
-            const st = portfolioMonthStats(month, [accId], {
-                [accId]: { profit: profitEl ? profitEl.value : '', flow: flowEl ? flowEl.value : '' },
-            }, member);
-            badge.textContent = st.rate === null ? '本金未知' : pctText(st.rate);
-            badge.classList.toggle('unknown', st.rate === null);
-            badge.classList.toggle('up', st.rate !== null && st.rate > 0);
-            badge.classList.toggle('down', st.rate !== null && st.rate < 0);
-        });
-    });
-}
-
-function clearReturnInputs() {
-    document.querySelectorAll('#returnEntryList .be-field').forEach(inp => { inp.value = ''; });
-}
-
-function saveReturns() {
-    const month = getModalMonth('return');
-    if (!month) { showToast('请选择月份', 'error'); return; }
-    const ms = document.getElementById('returnMemberSelect');
-    const member = (ms && ms.value) || state.balanceMembers[0] || '本人';
-    let saved = 0;
-    document.querySelectorAll('#returnEntryList .be-field').forEach(inp => {
-        const raw = String(inp.value).trim();
-        if (raw === '') return;
-        const amount = parseFloat(raw);
-        if (!isFinite(amount)) return;
-        const accountId = inp.dataset.account;
-        const id = _rebalanceId(member, accountId, month);
-        const flowEl = document.querySelector(`#returnEntryList .be-flow[data-account="${accountId}"]`);
-        const flowRaw = flowEl ? String(flowEl.value).trim() : '';
-        const flow = flowRaw === '' ? null : (parseFloat(flowRaw) || 0);
-        const existing = state.returns.find(r => r.id === id);
-        if (existing) {
-            const sameAmount = existing.amount === amount;
-            const sameFlow = (existing.flow === null || existing.flow === undefined) ? flow === null : Number(existing.flow) === flow;
-            if (sameAmount && sameFlow) return;
-            existing.amount = amount;
-            if (flow !== null) existing.flow = flow; else delete existing.flow;
-            existing.updatedAt = Date.now();
-        } else {
-            const rec = { id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() };
-            if (flow !== null) rec.flow = flow;
-            state.returns.push(rec);
-        }
-        saved += 1;
-    });
-    if (!saved) { showToast('没有需要保存的收益', 'error'); return; }
-    flushState();
-    closeReturnModal();
-    state.returnPeriod = 'month';
-    const [y, m] = month.split('-').map(Number);
-    state.returnYear = y;
-    state.returnMonth = m;
-    state.returnGran = null;
-    document.querySelectorAll('[data-ret-period]').forEach(b => b.classList.toggle('active', b.dataset.retPeriod === 'month'));
-    renderReturns();
-    showToast(`已保存 ${saved} 个账户的收益`, 'success');
-}
-
 function initReturnListeners() {
     document.querySelectorAll('[data-ret-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -9362,9 +9590,7 @@ function initReturnListeners() {
     if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });
     const mSel = document.getElementById('returnMonthSelect');
     if (mSel) mSel.addEventListener('change', e => { state.returnMonth = parseInt(e.target.value); renderReturns(); });
-    bindModalMonth('return', renderReturnEntry);
-    const rMemberSel = document.getElementById('returnMemberSelect');
-    if (rMemberSel) rMemberSel.addEventListener('change', renderReturnEntry);
+
 }
 
 // ---- Event Listeners ----
